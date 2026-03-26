@@ -185,15 +185,15 @@ def collect_tsne_features(model, data_loader, args, tsne_mode='text', max_per_cl
 
     with torch.no_grad():
         for data in data_loader:
-            text, audio, video, audio_kd, video_kd, qmask, umask, label = [d.cuda() for d in data[:-1]]
+            text, _, video, audio, _, qmask, umask, label = [d.cuda() for d in data[:-1]]
             lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
             if not getattr(args, 'use_audio', True):
-                audio_kd = torch.zeros_like(audio_kd)
+                audio = torch.zeros_like(audio)
             if not getattr(args, 'use_video', True):
                 video = torch.zeros_like(video)
 
-            outputs = model(text, audio_kd, video, umask, qmask, lengths, return_features=True)
+            outputs = model(text, audio, video, umask, qmask, lengths, return_features=True)
             _, _, _, _, _, _, feature_dict = outputs
 
             if tsne_mode not in feature_dict:
@@ -247,15 +247,15 @@ def collect_tsne_features_all(model, data_loader, args, max_per_class=200):
 
     with torch.no_grad():
         for data in data_loader:
-            text, audio, video, audio_kd, video_kd, qmask, umask, label = [d.cuda() for d in data[:-1]]
+            text, _, video, audio, _, qmask, umask, label = [d.cuda() for d in data[:-1]]
             lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
             if not getattr(args, 'use_audio', True):
-                audio_kd = torch.zeros_like(audio_kd)
+                audio = torch.zeros_like(audio)
             if not getattr(args, 'use_video', True):
                 video = torch.zeros_like(video)
 
-            outputs = model(text, audio_kd, video, umask, qmask, lengths, return_features=True)
+            outputs = model(text, audio, video, umask, qmask, lengths, return_features=True)
             _, _, _, _, _, _, feature_dict = outputs
 
             umask_bool = umask.bool()
@@ -397,19 +397,19 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
     for data in data_loader:
         if train:
             optimizer.zero_grad()
-        text, audio, video, audio_kd, video_kd, qmask, umask, label = [d.cuda() for d in data[:-1]]
+        text, _, video, audio, _, qmask, umask, label = [d.cuda() for d in data[:-1]]
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
         # --- modality ablation (input-level): T-only / T+A / T+V ---
-        # In this project, model audio input is audio_kd, video input is video (NOT video_kd).
+        
         if not getattr(args, 'use_audio', True):
-            audio_kd = torch.zeros_like(audio_kd)
+            audio = torch.zeros_like(audio)
         if not getattr(args, 'use_video', True):
             video = torch.zeros_like(video)
 
-        # t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio_kd, video_kd, umask, qmask, lengths)
-        t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio_kd, video, umask, qmask, lengths)
-        # _, t_logit = model(text, audio, video)
+        
+        t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio, video, umask, qmask, lengths)
+        
 
 
         umask_bool = umask.bool()
