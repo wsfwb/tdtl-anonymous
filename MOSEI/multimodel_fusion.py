@@ -212,7 +212,7 @@ def initialize_lazy_parameters(model, data_loader):
     model.eval()
     with torch.no_grad():
         batch = next(iter(data_loader))
-        text, _, video, audio, video_kd, qmask, umask, _ = [d.to(device) for d in batch[:-1]]
+        text, _, video, audio, _, qmask, umask, _ = [d.to(device) for d in batch[:-1]]
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
         model(text, audio, video, umask, qmask, lengths)
     return model
@@ -242,11 +242,11 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
     for data in data_loader:
         if train:
             optimizer.zero_grad()
-        text, _, video, audio, video_kd, qmask, umask, label = [d.cuda() for d in data[:-1]]
+        text, _, video, audio, _, qmask, umask, label = [d.cuda() for d in data[:-1]]
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
         # --- modality ablation (input-level): T-only / T+A / T+V ---
-        # NOTE: this project feeds audio as audio input, and video (NOT video_kd) as video input
+        
         if not getattr(args, 'use_audio', True):
             audio = torch.zeros_like(audio)
         if not getattr(args, 'use_video', True):
@@ -357,7 +357,7 @@ def collect_tsne_features(model, data_loader, args):
     labels_all = []
 
     for data in data_loader:
-        text, _, video, audio, video_kd, qmask, umask, label = [d.cuda() for d in data[:-1]]
+        text, _, video, audio, _, qmask, umask, label = [d.cuda() for d in data[:-1]]
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
         if not getattr(args, 'use_audio', True):
