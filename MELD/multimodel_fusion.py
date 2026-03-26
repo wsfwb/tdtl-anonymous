@@ -209,15 +209,15 @@ def collect_tsne_features_all(model, data_loader, args, max_per_class=200):
 
     with torch.no_grad():
         for data in data_loader:
-            text, audio, video, audio_kd, video_kd, qmask, umask, label = [d.cuda() for d in data[:-1]]
+            text, _, _, audio, video, qmask, umask, label = [d.cuda() for d in data[:-1]]
             lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
             if not getattr(args, 'use_audio', True):
-                audio_kd = torch.zeros_like(audio_kd)
+                audio = torch.zeros_like(audio)
             if not getattr(args, 'use_video', True):
-                video_kd = torch.zeros_like(video_kd)
+                video = torch.zeros_like(video)
 
-            outputs = model(text, audio_kd, video_kd, umask, qmask, lengths, return_features=True)
+            outputs = model(text, audio, video, umask, qmask, lengths, return_features=True)
             _, _, _, _, _, _, feature_dict = outputs
 
             umask_bool = umask.bool()
@@ -332,18 +332,18 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
     for data in data_loader:
         if train:
             optimizer.zero_grad()
-        text, audio, video, audio_kd, video_kd, qmask, umask, label = [d.cuda() for d in data[:-1]]
+        text, _, _, audio, video, qmask, umask, label = [d.cuda() for d in data[:-1]]
 
         if not getattr(args, 'use_audio', True):
-            audio_kd = torch.zeros_like(audio_kd)
+            audio = torch.zeros_like(audio)
         if not getattr(args, 'use_video', True):
-            video_kd = torch.zeros_like(video_kd)
+            video = torch.zeros_like(video)
 
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
-        # t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio, video, umask, qmask, lengths)
-        t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio_kd, video_kd, umask, qmask, lengths)
-        # t_log_probs = model(text, audio_kd, video_kd, umask, qmask, lengths)
+        
+        t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio, video, umask, qmask, lengths)
+        
 
 
         umask_bool = umask.bool()
@@ -383,7 +383,7 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
 
         # Optional R-Drop: second forward pass + symmetric KL for consistency
         if train and rdrop_w > 0:
-            t_logit2, a_logit2, v_logit2, t_hidden2, a_hidden2, v_hidden2 = model(text, audio_kd, video_kd, umask, qmask, lengths)
+            t_logit2, a_logit2, v_logit2, t_hidden2, a_hidden2, v_hidden2 = model(text, audio, video, umask, qmask, lengths)
             logit_t2 = t_logit2[umask_bool]
             logit_a2 = a_logit2[umask_bool]
             logit_v2 = v_logit2[umask_bool]
@@ -546,8 +546,8 @@ if __name__ == '__main__':
     parser.add_argument('--kd_feat_temp', type=float, default=1.0, help='temperature for Feature_Loss inside CE_Loss.')
     parser.add_argument('--num_layer', type=int, default=6, help='number of TransformerEncoder layers in each intra/inter module.')
     parser.add_argument('--n_rounds', type=int, default=1, help='number of interaction rounds for Transformer Model.')
-    parser.add_argument('--use_audio', type=str2bool, default=True, help='whether to use audio modality input (audio_kd).')
-    parser.add_argument('--use_video', type=str2bool, default=True, help='whether to use video modality input (video_kd).')
+    parser.add_argument('--use_audio', type=str2bool, default=True, help='whether to use audio modality input (audio).')
+    parser.add_argument('--use_video', type=str2bool, default=True, help='whether to use video modality input (video).')
     parser.add_argument('--draw_tsne', type=str2bool, default=False, help='whether to draw all-in-one t-SNE instead of training.')
     parser.add_argument('--tsne_split', type=str, default='test', choices=['train', 'dev', 'test'], help='which split to visualize.')
     parser.add_argument('--tsne_max_per_class', type=int, default=200, help='max samples per class for t-SNE.')
