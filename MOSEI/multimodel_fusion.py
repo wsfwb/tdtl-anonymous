@@ -436,12 +436,7 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
         train_loss, train_acc, _, _, _, train_fscore, train_acc2, train_f1, train_loss_a_kd, train_loss_v_kd = train_or_eval_model(model, train_loader, epoch, optimizer, scheduler, True, main_criterion, consistency_coef)
         valid_loss, valid_acc, _, _, _, valid_fscore, valid_acc2, valid_f1, valid_loss_a_kd, valid_loss_v_kd = train_or_eval_model(model, dev_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         test_loss, test_acc, label, pred, _, test_fscore, test_acc2, test_f1, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
-        test_acc = round(test_acc * 1.022, 2)
-        test_fscore = round(test_fscore * 1.022, 2)
-        train_fscore = round(train_fscore * 1.022, 2)
-        train_acc = round(train_acc * 1.022, 2)
-        valid_acc = round(valid_acc * 1.022, 2)
-        valid_fscore = round(valid_fscore * 1.022, 2)
+        
         history.append({
             'epoch': epoch,
             'train_loss': train_loss,
