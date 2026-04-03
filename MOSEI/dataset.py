@@ -63,8 +63,6 @@ class MOSEI_Dataset(Dataset):
         self.text = data['text']
         self.audio = data['audio']
         self.video = data['video']
-        self.audio_kd = data['audio_kd']
-        self.video_kd = data['video_kd']
         self.speakers = data['speakers']
         self.labels = data['labels']
         self.vids = data['vids']
@@ -111,8 +109,6 @@ class MOSEI_Dataset(Dataset):
         text = self._normalize_modality(self.text[vid])
         audio = self._normalize_modality(self.audio[vid])
         video = self._normalize_modality(self.video[vid])
-        audio_kd = self._normalize_modality(self.audio_kd[vid])
-        video_kd = self._normalize_modality(self.video_kd[vid])
 
         speakers = np.asarray(self.speakers[vid], dtype=np.float32)
         if speakers.ndim == 0:
@@ -124,8 +120,6 @@ class MOSEI_Dataset(Dataset):
             torch.FloatTensor(text),
             torch.FloatTensor(audio),
             torch.FloatTensor(video),
-            torch.FloatTensor(audio_kd),
-            torch.FloatTensor(video_kd),
             torch.FloatTensor(speakers),
             torch.FloatTensor([1] * len(labels)),
             torch.LongTensor(labels),
