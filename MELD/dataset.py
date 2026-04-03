@@ -50,8 +50,6 @@ class IEMOCAP_Dataset(Dataset):
         self.text = data['text']
         self.audio = data['audio']
         self.video = data['video']
-        self.audio_kd = data['audio_kd']
-        self.video_kd = data['video_kd']
         self.speakers = data['speakers']
         self.labels = data['labels']
         self.vids = data['vids']
@@ -66,8 +64,6 @@ class IEMOCAP_Dataset(Dataset):
         return torch.FloatTensor(np.array(self.text[vid])),\
                torch.FloatTensor(np.array(self.audio[vid])),\
                torch.FloatTensor(np.array(self.video[vid])),\
-               torch.FloatTensor(np.array(self.audio_kd[vid])),\
-               torch.FloatTensor(np.array(self.video_kd[vid])),\
                torch.FloatTensor(np.array(self.speakers[vid])),\
                torch.FloatTensor([1]*len(self.labels[vid])),\
                torch.LongTensor(self.labels[vid]),\
@@ -86,8 +82,6 @@ class MELD_MM_Dataset(Dataset):
         self.text = data['text']
         self.audio = data['audio']
         self.video = data['video']
-        self.audio_kd = data['audio_kd']
-        self.video_kd = data['video_kd']
         self.speakers = data['speakers']
         self.labels = data['labels']
         self.vids = data['vids']
@@ -102,8 +96,6 @@ class MELD_MM_Dataset(Dataset):
         return torch.FloatTensor(np.array(self.text[vid])),\
                torch.FloatTensor(np.array(self.audio[vid])),\
                torch.FloatTensor(np.array(self.video[vid])),\
-               torch.FloatTensor(np.array(self.audio_kd[vid])),\
-               torch.FloatTensor(np.array(self.video_kd[vid])),\
                torch.FloatTensor(np.array(self.speakers[vid])),\
                torch.FloatTensor([1]*len(self.labels[vid])),\
                torch.LongTensor(self.labels[vid]),\
