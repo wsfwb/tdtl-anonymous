@@ -33,7 +33,7 @@ class Text_model(nn.Module):
         super(Text_model, self).__init__()
 
         """Text Model"""
-        tmodel_path = os.path.join("pretrained_model", text_model)
+        tmodel_path = os.path.join("../pretrained_model", text_model)
         if text_model == "roberta-large":
             self.text_model = RobertaModel.from_pretrained(tmodel_path)
             tokenizer = RobertaTokenizer.from_pretrained(tmodel_path)
