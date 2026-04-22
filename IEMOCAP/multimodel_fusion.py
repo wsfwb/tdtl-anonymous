@@ -493,35 +493,14 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
         train_loss, train_acc, _, _, _, train_fscore, train_loss_a_kd, train_loss_v_kd = train_or_eval_model(model, train_loader, epoch, optimizer, scheduler, True, main_criterion, consistency_coef)
         valid_loss, valid_acc, _, _, _, valid_fscore, valid_loss_a_kd, valid_loss_v_kd = train_or_eval_model(model, dev_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         test_loss, test_acc, label, pred, _, test_fscore, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
-        history.append({
-            'epoch': epoch,
-            'train_loss': train_loss,
-            'train_acc': train_acc,
-            'valid_loss': valid_loss,
-            'valid_acc': valid_acc,
-            'test_loss': test_loss,
-            'test_acc': test_acc,
-            'test_fscore': test_fscore,
-        })
+        
 
         print(f'epoch: {epoch}, train_loss: {train_loss}, train_acc: {train_acc}, train_fscore: {train_fscore} valid_loss: {valid_loss}, valid_acc: {valid_acc}, valid_fscore: {valid_fscore},test_loss: {test_loss}, test_acc: {test_acc}, test_fscore: {test_fscore}, time: {time.time()}')
         print(f'epoch: {epoch}, train_loss_a_kd: {train_loss_a_kd}, train_loss_v_kd: {train_loss_v_kd}, valid_loss_a_kd: {valid_loss_a_kd}, valid_loss_v_kd: {valid_loss_v_kd}, test_loss_a_kd: {test_loss_a_kd}, test_loss_v_kd: {test_loss_v_kd}')
 
-        if best_fscore == None or test_fscore > best_fscore:
-            prev_best = -1 if best_fscore is None else best_fscore
-            best_fscore = test_fscore
-            print(f'[NEW BEST] epoch={epoch}  test_fscore={best_fscore}  (prev_best={prev_best})')
-            _SaveModel(model, './IEMOCAP/save_model', 'multimodal_fusion_best.bin')
-            save_labels_and_preds(label, pred, f'IEMOCAP/save_model/multimodal_fusion_best.json')
-            print(classification_report(label, pred, digits=4))
-            print(f'done')
+        
 
-    print('\n=== Epoch Summary ===')
-    print('epoch\ttrain_loss\ttrain_acc\tvalid_loss\tvalid_acc\ttest_loss\ttest_acc\ttest_fscore')
-    for h in history:
-        print(
-            f"{h['epoch']}\t{h['train_loss']}\t{h['train_acc']}\t{h['valid_loss']}\t{h['valid_acc']}\t{h['test_loss']}\t{h['test_acc']}\t{h['test_fscore']}"
-        )
+    
 
 
 # ===== 保存训练过程指标 =====
