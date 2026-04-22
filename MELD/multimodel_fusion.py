@@ -457,44 +457,15 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
         test_loss, test_acc, label, pred, _, test_fscore, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion)
         
 
-        epoch_metrics.append({
-            'epoch': int(epoch),
-            'train_loss': float(train_loss),
-            'train_acc': float(train_acc),
-            'valid_loss': float(valid_loss),
-            'valid_acc': float(valid_acc),
-            'test_acc': float(test_acc),
-            'test_fscore': float(test_fscore),
-        })
+       
 
         print(f'epoch: {epoch}, train_loss: {train_loss}, train_acc: {train_acc}, train_fscore: {train_fscore} valid_loss: {valid_loss}, valid_acc: {valid_acc}, valid_fscore: {valid_fscore},test_loss: {test_loss}, test_acc: {test_acc}, test_fscore: {test_fscore}, time: {time.time()}')
         print(f'epoch: {epoch}, train_loss_a_kd: {train_loss_a_kd}, train_loss_v_kd: {train_loss_v_kd}, valid_loss_a_kd: {valid_loss_a_kd}, valid_loss_v_kd: {valid_loss_v_kd}, test_loss_a_kd: {test_loss_a_kd}, test_loss_v_kd: {test_loss_v_kd}')
 
-        if best_fscore == None or test_fscore > best_fscore:
-            prev_best = best_fscore
-            best_fscore = test_fscore
-            print('=' * 72)
-            print(f'[NEW BEST] epoch={epoch}  test_fscore={test_fscore}  (prev_best={prev_best})')
-            print(f'train_loss={train_loss}  train_acc={train_acc}')
-            print(f'valid_loss={valid_loss}  valid_acc={valid_acc}')
-            print(f'test_acc={test_acc}  test_fscore={test_fscore}')
-            print('=' * 72)
-            _SaveModel(model, './MELD/save_model', 'multimodal_fusion_best.bin')
-            save_labels_and_preds(label, pred, f'MELD/save_model/multimodal_fusion_best.json')
-            print(f'done')
+       
 
     # Final summary: print all epochs and save to disk
-    if epoch_metrics:
-        print('\n' + '=' * 72)
-        print('Per-epoch summary (train_loss, train_acc, valid_loss, valid_acc, test_acc, test_fscore)')
-        print('=' * 72)
-        header = ['epoch', 'train_loss', 'train_acc', 'valid_loss', 'valid_acc', 'test_acc', 'test_fscore']
-        print('\t'.join(header))
-        for m in epoch_metrics:
-            print(
-                f"{m['epoch']}\t{m['train_loss']:.4f}\t{m['train_acc']:.2f}\t{m['valid_loss']:.4f}\t{m['valid_acc']:.2f}\t{m['test_acc']:.2f}\t{m['test_fscore']:.2f}"
-            )
-        print('=' * 72 + '\n')
+    
 
         save_dir = './MELD/save_model'
         os.makedirs(save_dir, exist_ok=True)
