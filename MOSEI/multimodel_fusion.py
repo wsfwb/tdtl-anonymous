@@ -437,55 +437,21 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
         valid_loss, valid_acc, _, _, _, valid_fscore, valid_acc2, valid_f1, valid_loss_a_kd, valid_loss_v_kd = train_or_eval_model(model, dev_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         test_loss, test_acc, label, pred, _, test_fscore, test_acc2, test_f1, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         
-        history.append({
-            'epoch': epoch,
-            'train_loss': train_loss,
-            'train_acc': train_acc,
-            'valid_loss': valid_loss,
-            'valid_acc': valid_acc,
-            'test_loss': test_loss,
-            'test_acc': test_acc,
-            'test_fscore': test_fscore,
-            'test_acc2': test_acc2,
-            'test_f1': test_f1,
-        })
+        
 
         print(f'epoch: {epoch}, train_loss: {train_loss}, train_acc7: {train_acc}, train_wf1: {train_fscore}, train_acc2: {train_acc2}, train_f1: {train_f1} | valid_loss: {valid_loss}, valid_acc7: {valid_acc}, valid_wf1: {valid_fscore}, valid_acc2: {valid_acc2}, valid_f1: {valid_f1} | test_loss: {test_loss}, test_acc7: {test_acc}, test_wf1: {test_fscore}, test_acc2: {test_acc2}, test_f1: {test_f1}, time: {time.time()}')
         print(f'epoch: {epoch}, train_loss_a_kd: {train_loss_a_kd}, train_loss_v_kd: {train_loss_v_kd}, valid_loss_a_kd: {valid_loss_a_kd}, valid_loss_v_kd: {valid_loss_v_kd}, test_loss_a_kd: {test_loss_a_kd}, test_loss_v_kd: {test_loss_v_kd}')
 
-        if best_acc == None or test_acc > best_acc:
-            prev_best = -1 if best_acc is None else best_acc
-            best_acc = test_acc
-            print(f'[NEW BEST] epoch={epoch}  test_acc={best_acc}  (prev_best={prev_best})')
-            _SaveModel(model, save_dir, os.path.basename(best_ckpt_path))
-            save_labels_and_preds(label, pred, best_pred_path)
-            print(classification_report(label, pred, digits=4, zero_division=0))
-            print(f'done')
+        
 
     print('\n=== Epoch Summary ===')
-    print('epoch\ttrain_loss\ttrain_acc7\tvalid_loss\tvalid_acc7\ttest_loss\ttest_acc7\ttest_wf1\ttest_acc2\ttest_f1')
-    for h in history:
-        print(
-            f"{h['epoch']}\t{h['train_loss']}\t{h['train_acc']}\t{h['valid_loss']}\t{h['valid_acc']}\t{h['test_loss']}\t{h['test_acc']}\t{h['test_fscore']}\t{h['test_acc2']}\t{h['test_f1']}"
-        )
+    
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     csv_path = os.path.join(save_dir, f'{exp_name}_metrics_{timestamp}.csv')
     json_path = os.path.join(save_dir, f'{exp_name}_metrics_{timestamp}.json')
 
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=[
-                'epoch',
-                'train_loss', 'train_acc',
-                'valid_loss', 'valid_acc',
-                'test_loss', 'test_acc', 'test_fscore',
-                'test_acc2', 'test_f1'
-            ]
-        )
-        writer.writeheader()
-        writer.writerows(history)
+    
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(history, f, indent=4, ensure_ascii=False)
