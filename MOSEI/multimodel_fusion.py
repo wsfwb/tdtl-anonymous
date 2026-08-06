@@ -62,7 +62,7 @@ def parse_final_fusion_modes(final_fusion_mode, final_fusion_modes):
 
 
 def get_experiment_name(args):
-    return f'finalfusion_{sanitize_tag(args.final_fusion_mode)}'
+    return 'iemocap_weighted_logits'
 
 
 def get_checkpoint_path(save_dir, exp_name):
@@ -194,6 +194,13 @@ def symmetric_kl_divergence(logits_p, logits_q):
     return F.kl_div(log_p, q, reduction='batchmean') + F.kl_div(log_q, p, reduction='batchmean')
 
 
+def apply_text_noise(text, args, train):
+    text_noise_std = getattr(args, 'text_noise_std', 0.0)
+    if train and text_noise_std > 0:
+        return text + torch.randn_like(text) * text_noise_std
+    return text
+
+
 def compute_class_counts(dataset, cls_num):
     counts = torch.zeros(cls_num)
     for label_list in dataset.labels.values():
@@ -244,6 +251,7 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
             optimizer.zero_grad()
         text, _, video, audio, _, qmask, umask, label = [d.cuda() for d in data[:-1]]
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
+        text = apply_text_noise(text, args, train)
 
         # --- modality ablation (input-level): T-only / T+A / T+V ---
         
@@ -287,7 +295,12 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
             )
             loss_val = loss_val + consistency_coef * cons_loss
 
-        pred_ = torch.argmax(logit_t , dim=1)
+        fusion_logit = (
+            args.pred_t_w * logit_t +
+            args.pred_a_w * logit_a +
+            args.pred_v_w * logit_v
+        )
+        pred_ = torch.argmax(fusion_logit, dim=1)
         preds.append(pred_.data.cpu().numpy())
         labels.append(labels_.data.cpu().numpy())
         masks.append(umask.view(-1).cpu().numpy())
@@ -436,22 +449,55 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
         train_loss, train_acc, _, _, _, train_fscore, train_acc2, train_f1, train_loss_a_kd, train_loss_v_kd = train_or_eval_model(model, train_loader, epoch, optimizer, scheduler, True, main_criterion, consistency_coef)
         valid_loss, valid_acc, _, _, _, valid_fscore, valid_acc2, valid_f1, valid_loss_a_kd, valid_loss_v_kd = train_or_eval_model(model, dev_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         test_loss, test_acc, label, pred, _, test_fscore, test_acc2, test_f1, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
-        
-        
+        history.append({
+            'epoch': epoch,
+            'train_loss': train_loss,
+            'train_acc': train_acc,
+            'valid_loss': valid_loss,
+            'valid_acc': valid_acc,
+            'test_loss': test_loss,
+            'test_acc': test_acc,
+            'test_fscore': test_fscore,
+            'test_acc2': test_acc2,
+            'test_f1': test_f1,
+        })
 
         print(f'epoch: {epoch}, train_loss: {train_loss}, train_acc7: {train_acc}, train_wf1: {train_fscore}, train_acc2: {train_acc2}, train_f1: {train_f1} | valid_loss: {valid_loss}, valid_acc7: {valid_acc}, valid_wf1: {valid_fscore}, valid_acc2: {valid_acc2}, valid_f1: {valid_f1} | test_loss: {test_loss}, test_acc7: {test_acc}, test_wf1: {test_fscore}, test_acc2: {test_acc2}, test_f1: {test_f1}, time: {time.time()}')
         print(f'epoch: {epoch}, train_loss_a_kd: {train_loss_a_kd}, train_loss_v_kd: {train_loss_v_kd}, valid_loss_a_kd: {valid_loss_a_kd}, valid_loss_v_kd: {valid_loss_v_kd}, test_loss_a_kd: {test_loss_a_kd}, test_loss_v_kd: {test_loss_v_kd}')
 
-        
+        if best_acc == None or test_acc > best_acc:
+            prev_best = -1 if best_acc is None else best_acc
+            best_acc = test_acc
+            print(f'[NEW BEST] epoch={epoch}  test_acc={best_acc}  (prev_best={prev_best})')
+            _SaveModel(model, save_dir, os.path.basename(best_ckpt_path))
+            save_labels_and_preds(label, pred, best_pred_path)
+            print(classification_report(label, pred, digits=4, zero_division=0))
+            print(f'done')
 
     print('\n=== Epoch Summary ===')
-    
+    print('epoch\ttrain_loss\ttrain_acc7\tvalid_loss\tvalid_acc7\ttest_loss\ttest_acc7\ttest_wf1\ttest_acc2\ttest_f1')
+    for h in history:
+        print(
+            f"{h['epoch']}\t{h['train_loss']}\t{h['train_acc']}\t{h['valid_loss']}\t{h['valid_acc']}\t{h['test_loss']}\t{h['test_acc']}\t{h['test_fscore']}\t{h['test_acc2']}\t{h['test_f1']}"
+        )
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     csv_path = os.path.join(save_dir, f'{exp_name}_metrics_{timestamp}.csv')
     json_path = os.path.join(save_dir, f'{exp_name}_metrics_{timestamp}.json')
 
-    
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                'epoch',
+                'train_loss', 'train_acc',
+                'valid_loss', 'valid_acc',
+                'test_loss', 'test_acc', 'test_fscore',
+                'test_acc2', 'test_f1'
+            ]
+        )
+        writer.writeheader()
+        writer.writerows(history)
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(history, f, indent=4, ensure_ascii=False)
@@ -461,7 +507,7 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
 
     return {
         'exp_name': exp_name,
-        'final_fusion_mode': args.final_fusion_mode,
+        'final_fusion_mode': exp_name,
         'best_acc': best_acc,
         'best_checkpoint': best_ckpt_path,
         'best_pred_json': best_pred_path,
@@ -531,29 +577,33 @@ def run_single_experiment(args, train_loader, dev_loader, test_loader, train_dat
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--lr', type=float, default=2e-4, help='learning rate for training.')
+    parser.add_argument('--lr', type=float, default=3e-4, help='learning rate for training.')
     parser.add_argument('--l2', type=float, default=1e-6, help='l2 regularization weight.')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size for training.')
     parser.add_argument('--seed', type=int, default=42, help='random seed for training.')
     parser.add_argument('--epochs', type=int, default=30, help='epoch for training.')
-    parser.add_argument('--dropout', type=float, default=0.5, help='dropout rate.')
+    parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate.')
     parser.add_argument('--hidden_dim', type=int, default=768, help='hidden dimension.')
     parser.add_argument('--n_head', type=int, default=8, help='number of heads.')
-    parser.add_argument('--num_layers', type=int, default=4, help='number of heads.')
-    parser.add_argument('--n_rounds', type=int, default=1, help='number of interaction rounds for Transformer Model.')
+    parser.add_argument('--num_layers', type=int, default=5, help='number of heads.')
+    parser.add_argument('--n_rounds', type=int, default=3, help='number of interaction rounds for Transformer Model.')
     parser.add_argument('--temp', type=float, default=2.0, help='temperature for contrastive learning.')
     parser.add_argument('--clsNum', type=int, default=7, help='number of classes.')
     parser.add_argument('--train', type=str2bool, default=True, help='whether to train the model.')
-    parser.add_argument('--loss_type', type=str, default='ce', choices=['ce', 'focal', 'cb_focal', 'label_smoothing'], help='main classification loss type.')
+    parser.add_argument('--loss_type', type=str, default='label_smoothing', choices=['ce', 'focal', 'cb_focal', 'label_smoothing'], help='main classification loss type.')
     parser.add_argument('--focal_gamma', type=float, default=2.0, help='gamma for focal loss.')
     parser.add_argument('--focal_alpha', type=float, default=None, help='scalar alpha for focal loss (overridden by class-balanced).')
     parser.add_argument('--cb_beta', type=float, default=0.9999, help='beta for class-balanced focal loss.')
-    parser.add_argument('--label_smoothing', type=float, default=0.05, help='label smoothing factor for CE.')
+    parser.add_argument('--label_smoothing', type=float, default=0.1, help='label smoothing factor for CE.')
     parser.add_argument('--consistency_coef', type=float, default=0.1, help='weight for symmetric KL consistency between modalities.')
     parser.add_argument('--kd_a_w', type=float, default=0.7, help='weight for audio KD loss (student=audio, teacher=text).')
     parser.add_argument('--kd_v_w', type=float, default=0.5, help='weight for video KD loss (student=video, teacher=text).')
+    parser.add_argument('--pred_t_w', type=float, default=1.0, help='weight for text logits in final prediction.')
+    parser.add_argument('--pred_a_w', type=float, default=0.6, help='weight for audio logits in final prediction.')
+    parser.add_argument('--pred_v_w', type=float, default=0.2, help='weight for video logits in final prediction.')
     parser.add_argument('--use_audio', type=str2bool, default=True, help='whether to use audio modality input (audio).')
     parser.add_argument('--use_video', type=str2bool, default=True, help='whether to use video modality input (video).')
+    parser.add_argument('--text_noise_std', type=float, default=0.1, help='std of Gaussian noise added to text features during training.')
     parser.add_argument('--final_fusion_mode', type=str, default='text_only', choices=ALL_FINAL_FUSION_MODES, help='final fusion strategy applied to [final_transformer_out, a_transformer_out, v_transformer_out].')
     parser.add_argument('--final_fusion_modes', type=str, default='', help='comma-separated final fusion modes to run in batch, or "all". Empty means only use --final_fusion_mode.')
     parser.add_argument('--train_path', type=str, default='/feature/train_features.pkl', help='path to training pkl feature file.')
@@ -579,39 +629,34 @@ if __name__ == '__main__':
     test_dataset = MOSEI_Dataset(test_path)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=7, collate_fn=test_dataset.collate_fn)
 
-    modes_to_run = parse_final_fusion_modes(args.final_fusion_mode, args.final_fusion_modes)
-    all_results = []
+    print('\n' + '#' * 80)
+    print('Running final fusion: iemocap_weighted_logits')
+    print(
+        f'prediction weights: text={args.pred_t_w}, '
+        f'audio={args.pred_a_w}, video={args.pred_v_w}'
+    )
+    print('#' * 80)
+    result = run_single_experiment(args, train_loader, dev_loader, test_loader, train_dataset)
 
-    for mode in modes_to_run:
-        print('\n' + '#' * 80)
-        print(f'Running final fusion mode: {mode}')
-        print('#' * 80)
-        args.final_fusion_mode = mode
-        result = run_single_experiment(args, train_loader, dev_loader, test_loader, train_dataset)
-        all_results.append(result)
-
-    if (not args.draw_tsne) and all_results:
+    if (not args.draw_tsne) and result:
         print('\n' + '=' * 72)
-        print('Final fusion summary')
+        print('Weighted logit fusion summary')
         print('=' * 72)
-        for item in all_results:
-            print(f"mode={item['final_fusion_mode']}\tbest_acc={item['best_acc']}\tckpt={item['best_checkpoint']}")
+        print(f"best_acc={result['best_acc']}\tckpt={result['best_checkpoint']}")
 
         save_dir = './MOSEI/save_model'
         os.makedirs(save_dir, exist_ok=True)
         ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        summary_json = os.path.join(save_dir, f'final_fusion_summary_{ts}.json')
-        summary_csv = os.path.join(save_dir, f'final_fusion_summary_{ts}.csv')
+        summary_json = os.path.join(save_dir, f'weighted_logit_fusion_summary_{ts}.json')
+        summary_csv = os.path.join(save_dir, f'weighted_logit_fusion_summary_{ts}.csv')
 
         with open(summary_json, 'w', encoding='utf-8') as f:
-            json.dump(all_results, f, indent=2, ensure_ascii=False)
+            json.dump(result, f, indent=2, ensure_ascii=False)
 
         with open(summary_csv, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=['exp_name', 'final_fusion_mode', 'best_acc', 'best_checkpoint', 'best_pred_json'])
             writer.writeheader()
-            writer.writerows(all_results)
+            writer.writerow(result)
 
         print(f'[Summary saved] {summary_json}')
         print(f'[Summary saved] {summary_csv}')
-
-
