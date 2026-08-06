@@ -9,31 +9,12 @@ import math
 
 from transformers import RobertaTokenizer, RobertaModel, TimesformerModel, Data2VecAudioModel
 
-class QualityHead(nn.Module):
-    """
-        Predict modality reliability q in (0,1).
-        Supports:
-            - (seq_len, batch, hidden) -> (seq_len, batch, 1)
-            - (N, hidden)              -> (N, 1)
-    """
-    def __init__(self, dim: int, hidden: int = 128):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, hidden),
-            nn.ReLU(inplace=True),
-            nn.Linear(hidden, 1),
-        )
-
-    def forward(self, h: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(self.net(h))
-
 class Text_model(nn.Module):
     def __init__(self, text_model, clsNum):
         super(Text_model, self).__init__()
 
         """Text Model"""
-        tmodel_path = os.path.join("../pretrained_model", text_model)
+        tmodel_path = os.path.join("/home/u2025170861/jupyterlab/MAGTKD-main/pretrained_model", text_model)
         if text_model == "roberta-large":
             self.text_model = RobertaModel.from_pretrained(tmodel_path)
             tokenizer = RobertaTokenizer.from_pretrained(tmodel_path)
@@ -290,11 +271,7 @@ class MultiHeadedAttention(nn.Module):
     def __init__(self, n_heads, d_model, dropout=0.1):
         super(MultiHeadedAttention, self).__init__()
 
-        if d_model % n_heads != 0:
-            raise ValueError(
-                f"MultiHeadedAttention requires d_model divisible by n_heads; got d_model={d_model}, n_heads={n_heads}. "
-                f"Please choose an --n_head that divides --hidden_dim."
-            )
+        assert d_model % n_heads == 0
         self.dim_per_head = d_model // n_heads
         self.d_model = d_model
         self.n_heads = n_heads
@@ -479,27 +456,25 @@ class Transformer_Based_Model(nn.Module):
         self.temp = args.temp
         self.clsNum = args.clsNum
         self.n_rounds = int(getattr(args, 'n_rounds', 1))
+        self.anchor_modality = getattr(args, 'anchor_modality', 't')
         self.n_speaker = 2
-        # self.device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
-        self.device = torch.device("cuda")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.speaker_embeddings = nn.Embedding(self.n_speaker + 1, args.hidden_dim, padding_idx=2).to(self.device)
         nn.init.normal_(self.speaker_embeddings.weight, mean=0, std=0.1)
 
-        num_layers = int(getattr(args, 'num_layers', 6))
-
         # Intra- and Inter-model Transformers
-        self.t_t = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
-        self.a_t = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
-        self.v_t = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
+        self.t_t = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
+        self.a_t = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
+        self.v_t = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
 
-        self.a_a = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
-        self.t_a = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
-        self.v_a = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
+        self.a_a = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
+        self.t_a = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
+        self.v_a = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
 
-        self.v_v = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
-        self.t_v = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
-        self.a_v = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=num_layers, dropout=args.dropout)
+        self.v_v = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
+        self.t_v = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
+        self.a_v = TransformerEncoder(d_model=args.hidden_dim, d_ff=args.hidden_dim, n_head=args.n_head, num_layers=args.num_layers, dropout=args.dropout)
 
         # Unimodal-level Gated Fusion
         self.t_t_gate = Unimodal_GatedFusion(args.hidden_dim)
@@ -524,18 +499,43 @@ class Transformer_Based_Model(nn.Module):
         self.w_a = nn.Linear(args.hidden_dim, self.clsNum)
         self.w_v = nn.Linear(args.hidden_dim, self.clsNum)
 
-        # --- Modality Quality Estimator (MQE) ---
-        self.q_a = QualityHead(args.hidden_dim, hidden=128)
-        self.q_v = QualityHead(args.hidden_dim, hidden=128)
-
-        # caches for training-time quality usage (no change to forward signature)
-        self._last_q_a = None  # (B, T, 1)
-        self._last_q_v = None  # (B, T, 1)
-        self._last_q_reg = None  # scalar
-
         self.out_dropout = nn.Dropout(args.dropout)
 
-    def forward(self, text, audio, video, u_mask, q_mask, dia_len):  # text:(sql, batch, hidden) umask:(batch, sql)
+    def _update_audio(self, text, audio, video, u_mask, spk_embeddings, audio_res):
+        a_a_transformer_out = self.a_a(audio, audio, u_mask, spk_embeddings)
+        t_a_transformer_out = self.t_a(text, audio, u_mask, spk_embeddings)
+        v_a_transformer_out = self.v_a(video, audio, u_mask, spk_embeddings)
+        a_a_transformer_out = self.a_a_gate(a_a_transformer_out)
+        t_a_transformer_out = self.t_a_gate(t_a_transformer_out)
+        v_a_transformer_out = self.v_a_gate(v_a_transformer_out)
+        audio_out = self.a_fusion(a_a_transformer_out, t_a_transformer_out, v_a_transformer_out)
+        audio_out = self.out_dropout(audio_out)
+        return audio_out + audio_res
+
+    def _update_video(self, text, audio, video, u_mask, spk_embeddings, video_res):
+        v_v_transformer_out = self.v_v(video, video, u_mask, spk_embeddings)
+        t_v_transformer_out = self.t_v(text, video, u_mask, spk_embeddings)
+        a_v_transformer_out = self.a_v(audio, video, u_mask, spk_embeddings)
+        v_v_transformer_out = self.v_v_gate(v_v_transformer_out)
+        t_v_transformer_out = self.t_v_gate(t_v_transformer_out)
+        a_v_transformer_out = self.a_v_gate(a_v_transformer_out)
+        video_out = self.v_fusion(v_v_transformer_out, t_v_transformer_out, a_v_transformer_out)
+        video_out = self.out_dropout(video_out)
+        return video_out + video_res
+
+    def _update_text(self, text, audio, video, u_mask, spk_embeddings, text_res):
+        t_t_transformer_out = self.t_t(text, text, u_mask, spk_embeddings)
+        a_t_transformer_out = self.t_t(audio, text, u_mask, spk_embeddings)
+        v_t_transformer_out = self.t_t(video, text, u_mask, spk_embeddings)
+        t_t_transformer_out = self.t_t_gate(t_t_transformer_out)
+        a_t_transformer_out = self.t_t_gate(a_t_transformer_out)
+        v_t_transformer_out = self.t_t_gate(v_t_transformer_out)
+
+        text_out = self.t_fusion(t_t_transformer_out, a_t_transformer_out, v_t_transformer_out)
+        text_out = self.out_dropout(text_out)
+        return text_out + text_res, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out
+
+    def forward(self, text, audio, video, u_mask, q_mask, dia_len, return_features=False):  # text:(sql, batch, hidden) umask:(batch, sql)
         spk_idx = q_mask
         origin_spk_idx = spk_idx
         for i, x in enumerate(dia_len):
@@ -547,10 +547,14 @@ class Transformer_Based_Model(nn.Module):
         audio = audio.transpose(0, 1)
         video = video.transpose(0, 1)
 
-        # reset caches each forward
-        self._last_q_a = None
-        self._last_q_v = None
-        self._last_q_reg = None
+        # keep original inputs for t-SNE visualization
+        audio_input = audio
+        video_input = video
+
+        # expose for t-SNE
+        a_t_transformer_out = None
+        v_t_transformer_out = None
+        t_t_transformer_out = None
 
         for _ in range(self.n_rounds):
             text_res = text
@@ -561,66 +565,40 @@ class Transformer_Based_Model(nn.Module):
             audio = self.out_dropout(audio)
             video = self.out_dropout(video)
 
-
-            a_a_transformer_out = self.a_a(audio, audio, u_mask, spk_embeddings)
-            t_a_transformer_out = self.t_a(text, audio, u_mask, spk_embeddings)
-            v_a_transformer_out = self.v_a(video, audio, u_mask, spk_embeddings)
-            a_a_transformer_out = self.a_a_gate(a_a_transformer_out)
-            t_a_transformer_out = self.t_a_gate(t_a_transformer_out)
-            v_a_transformer_out = self.v_a_gate(v_a_transformer_out)
-            a_transformer_out = self.a_fusion(a_a_transformer_out, t_a_transformer_out, v_a_transformer_out)
-            a_transformer_out = self.out_dropout(a_transformer_out)
-            a_transformer_out = a_transformer_out + audio_res
-            
-
-
-            v_v_transformer_out = self.v_v(video, video, u_mask, spk_embeddings)
-            t_v_transformer_out = self.t_v(text, video, u_mask, spk_embeddings)
-            a_v_transformer_out = self.a_v(audio, video, u_mask, spk_embeddings)
-            v_v_transformer_out = self.v_v_gate(v_v_transformer_out)
-            t_v_transformer_out = self.t_v_gate(t_v_transformer_out)
-            a_v_transformer_out = self.a_v_gate(a_v_transformer_out)
-            v_transformer_out = self.v_fusion(v_v_transformer_out, t_v_transformer_out, a_v_transformer_out)
-            v_transformer_out = self.out_dropout(v_transformer_out)
-            v_transformer_out = v_transformer_out + video_res
-            
-
-
-            t_t_transformer_out = self.t_t(text, text, u_mask, spk_embeddings)
-            a_t_transformer_out = self.t_t(a_transformer_out, text, u_mask, spk_embeddings)
-            v_t_transformer_out = self.t_t(v_transformer_out, text, u_mask, spk_embeddings)
-
-            # ===== MQE: estimate per-utterance modality reliability =====
-            # NOTE: after transpose, tensors are batch-first: (B, T, H) -> (B, T, 1)
-            q_a = self.q_a(a_transformer_out)  # (B, T, 1)
-            q_v = self.q_v(v_transformer_out)  # (B, T, 1)
-            self._last_q_a = q_a
-            self._last_q_v = q_v
-            # anti-collapse regularizer (added in training loop with tiny fixed weight)
-            self._last_q_reg = (q_a.mean() - 0.6).pow(2) + (q_v.mean() - 0.6).pow(2)
-            t_t_transformer_out = self.t_t_gate(t_t_transformer_out)
-            a_t_transformer_out = self.t_t_gate(a_t_transformer_out)
-            v_t_transformer_out = self.t_t_gate(v_t_transformer_out)
-
-            # ===== quality-aware message injection to text =====
-            a_t_transformer_out = a_t_transformer_out * q_a
-            v_t_transformer_out = v_t_transformer_out * q_v
-
-            final_transformer_out = self.t_fusion(t_t_transformer_out, a_t_transformer_out, v_t_transformer_out)
-            final_transformer_out = self.out_dropout(final_transformer_out)
-            final_transformer_out = final_transformer_out + text_res
-
-            text = final_transformer_out
-            audio = a_transformer_out
-            video = v_transformer_out
-
-
-        # return t_log_probs, a_log_probs, v_log_probs, all_log_probs, all_probs, kl_t_log_prob, kl_a_log_prob, kl_v_log_prob, kl_all_prob
-        # hidden = self.fc(torch.cat([t_t_transformer_out, a_t_transformer_out, v_t_transformer_out], dim=-1))
+            if self.anchor_modality == 'a':
+                text, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out = self._update_text(
+                    text, audio, video, u_mask, spk_embeddings, text_res
+                )
+                video = self._update_video(text, audio, video, u_mask, spk_embeddings, video_res)
+                audio = self._update_audio(text, audio, video, u_mask, spk_embeddings, audio_res)
+            elif self.anchor_modality == 'v':
+                text, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out = self._update_text(
+                    text, audio, video, u_mask, spk_embeddings, text_res
+                )
+                audio = self._update_audio(text, audio, video, u_mask, spk_embeddings, audio_res)
+                video = self._update_video(text, audio, video, u_mask, spk_embeddings, video_res)
+            else:
+                audio = self._update_audio(text, audio, video, u_mask, spk_embeddings, audio_res)
+                video = self._update_video(text, audio, video, u_mask, spk_embeddings, video_res)
+                text, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out = self._update_text(
+                    text, audio, video, u_mask, spk_embeddings, text_res
+                )
 
         t_logits = self.w_t(text)
         a_logits = self.w_a(audio)
         v_logits = self.w_v(video)
+
+        if return_features:
+            feature_dict = {
+                'text': text,
+                'audio': audio_input,
+                'video': video_input,
+                'text_tl_audio': audio,
+                'text_tl_video': video,
+                'text_self': t_t_transformer_out,
+            }
+            return t_logits, a_logits, v_logits, text, audio, video, feature_dict
+
         return t_logits, a_logits, v_logits, text, audio, video
 
 
@@ -677,7 +655,6 @@ class TestModel(nn.Module):
         logits = self.w(combine)
 
         return logits
-
 
 
 
