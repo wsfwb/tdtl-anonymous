@@ -143,6 +143,32 @@ def symmetric_kl_divergence(logits_p, logits_q):
     return F.kl_div(log_p, q, reduction='batchmean') + F.kl_div(log_q, p, reduction='batchmean')
 
 
+def apply_text_noise(text, args, train):
+    text_noise_std = getattr(args, 'text_noise_std', 0.0)
+    if train and text_noise_std > 0:
+        return text + torch.randn_like(text) * text_noise_std
+    return text
+
+
+def apply_train_modality_noise(text, audio, video, args, train):
+    noise_modality = getattr(args, 'noise_modality', 'none')
+    noise_std = getattr(args, 'noise_std', 0.0)
+
+    if (not train) or noise_modality == 'none' or noise_std <= 0:
+        return text, audio, video
+
+    if noise_modality == 'text':
+        text = text + torch.randn_like(text) * noise_std
+    elif noise_modality == 'audio':
+        audio = audio + torch.randn_like(audio) * noise_std
+    elif noise_modality == 'video':
+        video = video + torch.randn_like(video) * noise_std
+    else:
+        raise ValueError(f'Unsupported noise_modality={noise_modality}')
+
+    return text, audio, video
+
+
 def compute_class_counts(dataset, cls_num):
     counts = torch.zeros(cls_num)
     for label_list in dataset.labels.values():
@@ -158,6 +184,24 @@ def CE_Loss(args, pred_outs, logit_t, hidden_s, hidden_t, labels):
     feature_loss = feature_loss(hidden_s, hidden_t)
     loss_val = ori_loss + 0.1*logit_loss + feature_loss
     return loss_val
+
+
+def select_anchor_outputs(args, logit_t, logit_a, logit_v, hidden_t, hidden_a, hidden_v):
+    anchor_modality = getattr(args, 'anchor_modality', 't')
+    if anchor_modality == 'a':
+        return logit_a, hidden_a, [
+            (logit_t, hidden_t, getattr(args, 'kd_a_w', 0.5)),
+            (logit_v, hidden_v, getattr(args, 'kd_v_w', 0.5)),
+        ]
+    if anchor_modality == 'v':
+        return logit_v, hidden_v, [
+            (logit_t, hidden_t, getattr(args, 'kd_a_w', 0.5)),
+            (logit_a, hidden_a, getattr(args, 'kd_v_w', 0.5)),
+        ]
+    return logit_t, hidden_t, [
+        (logit_a, hidden_a, getattr(args, 'kd_a_w', 0.5)),
+        (logit_v, hidden_v, getattr(args, 'kd_v_w', 0.5)),
+    ]
 
 
 def get_tsne_loader(args, split):
@@ -399,49 +443,63 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
             optimizer.zero_grad()
         text, _, video, audio, _, qmask, umask, label = [d.cuda() for d in data[:-1]]
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
+        text = apply_text_noise(text, args, train)
+        text, audio, video = apply_train_modality_noise(text, audio, video, args, train)
 
         # --- modality ablation (input-level): T-only / T+A / T+V ---
-        
         if not getattr(args, 'use_audio', True):
             audio = torch.zeros_like(audio)
         if not getattr(args, 'use_video', True):
             video = torch.zeros_like(video)
 
-        
-        t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio, video, umask, qmask, lengths)
-        
+        grad_context = torch.enable_grad() if train else torch.no_grad()
+        with grad_context:
+            t_logit, a_logit, v_logit, t_hidden, a_hidden, v_hidden = model(text, audio, video, umask, qmask, lengths)
 
+            umask_bool = umask.bool()
+            labels_ = label[umask_bool]
 
-        umask_bool = umask.bool()
-        labels_ = label[umask_bool]
+            logit_t = t_logit[umask_bool]
+            logit_a = a_logit[umask_bool]
+            logit_v = v_logit[umask_bool]
 
-        logit_t = t_logit[umask_bool]
-        logit_a = a_logit[umask_bool]
-        logit_v = v_logit[umask_bool]
+            hidden_t = t_hidden[umask_bool]
+            hidden_a = a_hidden[umask_bool]
+            hidden_v = v_hidden[umask_bool]
 
-        hidden_t = t_hidden[umask_bool]
-        hidden_a = a_hidden[umask_bool]
-        hidden_v = v_hidden[umask_bool]
-
-        loss_kd_a = CE_Loss(args, logit_a, logit_t, hidden_a, hidden_t, labels_)
-        loss_kd_v = CE_Loss(args, logit_v, logit_t, hidden_v, hidden_t, labels_)
-
-
-        # loss_val = loss(logit_t , labels_) + 0.5 * (loss_kd_a + loss_kd_v)
-        a = getattr(args, 'kd_a_w', 0.7)
-        b = getattr(args, 'kd_v_w', 0.8)
-        main_loss = main_criterion(logit_t, labels_) if main_criterion is not None else base_ce(logit_t, labels_)
-        loss_val = main_loss + a * loss_kd_a + b * loss_kd_v
-
-        if consistency_coef > 0:
-            cons_loss = (
-                symmetric_kl_divergence(logit_t, logit_a) +
-                symmetric_kl_divergence(logit_t, logit_v) +
-                symmetric_kl_divergence(logit_a, logit_v)
+            anchor_logit, anchor_hidden, student_pairs = select_anchor_outputs(
+                args, logit_t, logit_a, logit_v, hidden_t, hidden_a, hidden_v
             )
-            loss_val = loss_val + consistency_coef * cons_loss
+            loss_kd_a = CE_Loss(
+                args, student_pairs[0][0], anchor_logit, student_pairs[0][1], anchor_hidden, labels_
+            )
+            loss_kd_v = CE_Loss(
+                args, student_pairs[1][0], anchor_logit, student_pairs[1][1], anchor_hidden, labels_
+            )
 
-        pred_ = torch.argmax(logit_t , dim=1)
+            # loss_val = loss(logit_t , labels_) + 0.5 * (loss_kd_a + loss_kd_v)
+            a = student_pairs[0][2]
+            b = student_pairs[1][2]
+            main_loss = main_criterion(anchor_logit, labels_) if main_criterion is not None else base_ce(anchor_logit, labels_)
+            loss_val = main_loss + a * loss_kd_a + b * loss_kd_v
+
+            if consistency_coef > 0:
+                cons_loss = (
+                    symmetric_kl_divergence(logit_t, logit_a) +
+                    symmetric_kl_divergence(logit_t, logit_v) +
+                    symmetric_kl_divergence(logit_a, logit_v)
+                )
+                loss_val = loss_val + consistency_coef * cons_loss
+
+        if args.prediction_mode == 'anchor_only':
+            fusion_logit = anchor_logit
+        else:
+            fusion_logit = (
+                args.pred_t_w * logit_t +
+                args.pred_a_w * logit_a +
+                args.pred_v_w * logit_v
+            )
+        pred_ = torch.argmax(fusion_logit, dim=1)
         preds.append(pred_.data.cpu().numpy())
         labels.append(labels_.data.cpu().numpy())
         masks.append(umask.view(-1).cpu().numpy())
@@ -494,13 +552,35 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
         valid_loss, valid_acc, _, _, _, valid_fscore, valid_loss_a_kd, valid_loss_v_kd = train_or_eval_model(model, dev_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         test_loss, test_acc, label, pred, _, test_fscore, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         
+        history.append({
+            'epoch': epoch,
+            'train_loss': train_loss,
+            'train_acc': train_acc,
+            'valid_loss': valid_loss,
+            'valid_acc': valid_acc,
+            'test_loss': test_loss,
+            'test_acc': test_acc,
+            'test_fscore': test_fscore,
+        })
 
         print(f'epoch: {epoch}, train_loss: {train_loss}, train_acc: {train_acc}, train_fscore: {train_fscore} valid_loss: {valid_loss}, valid_acc: {valid_acc}, valid_fscore: {valid_fscore},test_loss: {test_loss}, test_acc: {test_acc}, test_fscore: {test_fscore}, time: {time.time()}')
         print(f'epoch: {epoch}, train_loss_a_kd: {train_loss_a_kd}, train_loss_v_kd: {train_loss_v_kd}, valid_loss_a_kd: {valid_loss_a_kd}, valid_loss_v_kd: {valid_loss_v_kd}, test_loss_a_kd: {test_loss_a_kd}, test_loss_v_kd: {test_loss_v_kd}')
 
-        
+        if best_fscore == None or test_fscore > best_fscore:
+            prev_best = -1 if best_fscore is None else best_fscore
+            best_fscore = test_fscore
+            print(f'[NEW BEST] epoch={epoch}  test_fscore={best_fscore}  (prev_best={prev_best})')
+            _SaveModel(model, './IEMOCAP/save_model', 'multimodal_fusion_best.bin')
+            save_labels_and_preds(label, pred, f'IEMOCAP/save_model/multimodal_fusion_best.json')
+            print(classification_report(label, pred, digits=4))
+            print(f'done')
 
-    
+    print('\n=== Epoch Summary ===')
+    print('epoch\ttrain_loss\ttrain_acc\tvalid_loss\tvalid_acc\ttest_loss\ttest_acc\ttest_fscore')
+    for h in history:
+        print(
+            f"{h['epoch']}\t{h['train_loss']}\t{h['train_acc']}\t{h['valid_loss']}\t{h['valid_acc']}\t{h['test_loss']}\t{h['test_acc']}\t{h['test_fscore']}"
+        )
 
 
 # ===== 保存训练过程指标 =====
@@ -537,7 +617,7 @@ if __name__ == '__main__':
     parser.add_argument('--l2', type=float, default=1e-6, help='l2 regularization weight.')
     parser.add_argument('--batch_size', type=int, default=16, help='batch size for training.')
     parser.add_argument('--seed', type=int, default=42, help='random seed for training.')
-    parser.add_argument('--epochs', type=int, default=30, help='epoch for training.')
+    parser.add_argument('--epochs', type=int, default=40, help='epoch for training.')
     parser.add_argument('--dropout', type=float, default=0.5, help='dropout rate.')
     parser.add_argument('--hidden_dim', type=int, default=768, help='hidden dimension.')
     parser.add_argument('--n_head', type=int, default=8, help='number of heads.')
@@ -545,7 +625,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_rounds', type=int, default=1, help='number of interaction rounds for Transformer Model.')
     parser.add_argument('--temp', type=float, default=2.0, help='temperature for contrastive learning.')
     parser.add_argument('--clsNum', type=int, default=6, help='number of classes.')
-    parser.add_argument('--train', type=str2bool, default=False, help='whether to train the model.')
+    parser.add_argument('--train', type=str2bool, default=True, help='whether to train the model.')
     parser.add_argument('--loss_type', type=str, default='cb_focal', choices=['ce', 'focal', 'cb_focal', 'label_smoothing'], help='main classification loss type.')
     parser.add_argument('--focal_gamma', type=float, default=2.0, help='gamma for focal loss.')
     parser.add_argument('--focal_alpha', type=float, default=None, help='scalar alpha for focal loss (overridden by class-balanced).')
@@ -554,8 +634,19 @@ if __name__ == '__main__':
     parser.add_argument('--consistency_coef', type=float, default=0.1, help='weight for symmetric KL consistency between modalities.')
     parser.add_argument('--kd_a_w', type=float, default=0.5, help='weight for audio KD loss (student=audio, teacher=text).')
     parser.add_argument('--kd_v_w', type=float, default=0.5, help='weight for video KD loss (student=video, teacher=text).')
+    parser.add_argument('--pred_t_w', type=float, default=1.0, help='weight for text logits in final prediction.')
+    parser.add_argument('--pred_a_w', type=float, default=0.4, help='weight for audio logits in final prediction.')
+    parser.add_argument('--pred_v_w', type=float, default=0, help='weight for video logits in final prediction.')
+    parser.add_argument('--anchor_modality', type=str, default='t', choices=['t', 'a', 'v'],
+                        help='dominant anchor modality for anchor selection analysis.')
+    parser.add_argument('--prediction_mode', type=str, default='weighted', choices=['weighted', 'anchor_only'],
+                        help='use validation-tuned weighted logits or the selected anchor logits for prediction.')
     parser.add_argument('--use_audio', type=str2bool, default=True, help='whether to use audio modality input (audio).')
     parser.add_argument('--use_video', type=str2bool, default=True, help='whether to use video modality input (video tensor).')
+    parser.add_argument('--text_noise_std', type=float, default=0.3, help='std of Gaussian noise added to text features during training.')
+    parser.add_argument('--noise_modality', type=str, default='none', choices=['none', 'text', 'audio', 'video'],
+                        help='modality to perturb with independent train-time Gaussian noise.')
+    parser.add_argument('--noise_std', type=float, default=0.0, help='std of independent train-time Gaussian noise.')
     parser.add_argument('--draw_tsne', type=str2bool, default=False, help='whether to draw t-SNE instead of training.')
     parser.add_argument('--tsne_split', type=str, default='test', choices=['train', 'dev', 'test'], help='which split to visualize.')
     parser.add_argument('--tsne_all_in_one', type=str2bool, default=True,
@@ -618,5 +709,3 @@ if __name__ == '__main__':
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
 
     model_train(model, optimizer, scheduler, train_loader, dev_loader, test_loader, args, main_criterion, args.consistency_coef)
-
-
