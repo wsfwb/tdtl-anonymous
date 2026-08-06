@@ -460,6 +460,7 @@ class Transformer_Based_Model(nn.Module):
         self.clsNum = args.clsNum
         self.n_speaker = 304
         self.n_rounds = int(getattr(args, 'n_rounds', 1))
+        self.anchor_modality = getattr(args, 'anchor_modality', 't')
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.speaker_embeddings = nn.Embedding(self.n_speaker + 1, args.hidden_dim, padding_idx=2).to(self.device)
@@ -509,6 +510,39 @@ class Transformer_Based_Model(nn.Module):
         # Extra dropout to reduce overfitting
         self.out_dropout = nn.Dropout(args.dropout)
 
+    def _update_audio(self, text, audio, video, u_mask, spk_embeddings, audio_res):
+        a_a_transformer_out = self.a_a(audio, audio, u_mask, spk_embeddings)
+        t_a_transformer_out = self.t_a(text, audio, u_mask, spk_embeddings)
+        v_a_transformer_out = self.v_a(video, audio, u_mask, spk_embeddings)
+        a_a_transformer_out = self.a_a_gate(a_a_transformer_out)
+        t_a_transformer_out = self.t_a_gate(t_a_transformer_out)
+        v_a_transformer_out = self.v_a_gate(v_a_transformer_out)
+        audio_out = self.a_fusion(a_a_transformer_out, t_a_transformer_out, v_a_transformer_out)
+        audio_out = self.out_dropout(audio_out)
+        return audio_out + audio_res
+
+    def _update_video(self, text, audio, video, u_mask, spk_embeddings, video_res):
+        v_v_transformer_out = self.v_v(video, video, u_mask, spk_embeddings)
+        t_v_transformer_out = self.t_v(text, video, u_mask, spk_embeddings)
+        a_v_transformer_out = self.a_v(audio, video, u_mask, spk_embeddings)
+        v_v_transformer_out = self.v_v_gate(v_v_transformer_out)
+        t_v_transformer_out = self.t_v_gate(t_v_transformer_out)
+        a_v_transformer_out = self.a_v_gate(a_v_transformer_out)
+        video_out = self.v_fusion(v_v_transformer_out, t_v_transformer_out, a_v_transformer_out)
+        video_out = self.out_dropout(video_out)
+        return video_out + video_res
+
+    def _update_text(self, text, audio, video, u_mask, spk_embeddings, text_res):
+        t_t_transformer_out = self.t_t(text, text, u_mask, spk_embeddings)
+        a_t_transformer_out = self.t_t(audio, text, u_mask, spk_embeddings)
+        v_t_transformer_out = self.t_t(video, text, u_mask, spk_embeddings)
+        t_t_transformer_out = self.t_t_gate(t_t_transformer_out)
+        a_t_transformer_out = self.t_t_gate(a_t_transformer_out)
+        v_t_transformer_out = self.t_t_gate(v_t_transformer_out)
+        text_out = self.t_fusion(t_t_transformer_out, a_t_transformer_out, v_t_transformer_out)
+        text_out = self.out_dropout(text_out)
+        return text_out + text_res, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out
+
     def forward(self, text, audio, video, u_mask, q_mask, dia_len, return_features=False):  # text:(sql, batch, hidden) umask:(batch, sql)
         spk_idx = q_mask
         origin_spk_idx = spk_idx
@@ -546,52 +580,31 @@ class Transformer_Based_Model(nn.Module):
             if video_init is None:
                 video_init = video
 
+            if self.anchor_modality == 'a':
+                text, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out = self._update_text(
+                    text, audio, video, u_mask, spk_embeddings, text_res
+                )
+                video = self._update_video(text, audio, video, u_mask, spk_embeddings, video_res)
+                audio = self._update_audio(text, audio, video, u_mask, spk_embeddings, audio_res)
+            elif self.anchor_modality == 'v':
+                text, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out = self._update_text(
+                    text, audio, video, u_mask, spk_embeddings, text_res
+                )
+                audio = self._update_audio(text, audio, video, u_mask, spk_embeddings, audio_res)
+                video = self._update_video(text, audio, video, u_mask, spk_embeddings, video_res)
+            else:
+                audio = self._update_audio(text, audio, video, u_mask, spk_embeddings, audio_res)
+                video = self._update_video(text, audio, video, u_mask, spk_embeddings, video_res)
+                text, t_t_transformer_out, a_t_transformer_out, v_t_transformer_out = self._update_text(
+                    text, audio, video, u_mask, spk_embeddings, text_res
+                )
 
-            a_a_transformer_out = self.a_a(audio, audio, u_mask, spk_embeddings)
-            t_a_transformer_out = self.t_a(text, audio, u_mask, spk_embeddings)
-            v_a_transformer_out = self.v_a(video, audio, u_mask, spk_embeddings)
-            a_a_transformer_out = self.a_a_gate(a_a_transformer_out)
-            t_a_transformer_out = self.t_a_gate(t_a_transformer_out)
-            v_a_transformer_out = self.v_a_gate(v_a_transformer_out)
-            a_transformer_out = self.a_fusion(a_a_transformer_out, t_a_transformer_out, v_a_transformer_out)
-            a_transformer_out = self.out_dropout(a_transformer_out)
-            # a_transformer_out = self.out_dropout(a_transformer_out)
-            a_transformer_out = a_transformer_out + audio_res
-
-            # save the "middle" audio representation for t-SNE:
-            # after audio-branch fusion/residual update, before it is overwritten
-            # by the next interaction round
             if audio_mid is None:
-                audio_mid = a_transformer_out
+                audio_mid = audio
 
-
-            v_v_transformer_out = self.v_v(video, video, u_mask, spk_embeddings)
-            t_v_transformer_out = self.t_v(text, video, u_mask, spk_embeddings)
-            a_v_transformer_out = self.a_v(audio, video, u_mask, spk_embeddings)
-            v_v_transformer_out = self.v_v_gate(v_v_transformer_out)
-            t_v_transformer_out = self.t_v_gate(t_v_transformer_out)
-            a_v_transformer_out = self.a_v_gate(a_v_transformer_out)
-            v_transformer_out = self.v_fusion(v_v_transformer_out, t_v_transformer_out, a_v_transformer_out)
-            v_transformer_out = self.out_dropout(v_transformer_out)
-            # v_transformer_out = self.out_dropout(v_transformer_out)
-            v_transformer_out = v_transformer_out + video_res
-
-
-            t_t_transformer_out = self.t_t(text, text, u_mask, spk_embeddings)
-            a_t_transformer_out = self.t_t(a_transformer_out, text, u_mask, spk_embeddings)
-            v_t_transformer_out = self.t_t(v_transformer_out, text, u_mask, spk_embeddings)
-            t_t_transformer_out = self.t_t_gate(t_t_transformer_out)
-            a_t_transformer_out = self.t_t_gate(a_t_transformer_out)
-            v_t_transformer_out = self.t_t_gate(v_t_transformer_out)
-
-            final_transformer_out = self.t_fusion(t_t_transformer_out, a_t_transformer_out, v_t_transformer_out)
-            final_transformer_out = self.out_dropout(final_transformer_out)
-            # final_transformer_out = self.out_dropout(final_transformer_out)
-            final_transformer_out = final_transformer_out + text_res
-
-            text = final_transformer_out
-            audio = a_transformer_out
-            video = v_transformer_out
+        final_transformer_out = text
+        a_transformer_out = audio
+        v_transformer_out = video
         # return t_log_probs, a_log_probs, v_log_probs, all_log_probs, all_probs, kl_t_log_prob, kl_a_log_prob, kl_v_log_prob, kl_all_prob
         # hidden = self.fc(torch.cat([t_t_transformer_out, a_t_transformer_out, v_t_transformer_out], dim=-1))
 
@@ -665,7 +678,6 @@ class TestModel(nn.Module):
         logits = self.w(combine)
 
         return logits
-
 
 
 
