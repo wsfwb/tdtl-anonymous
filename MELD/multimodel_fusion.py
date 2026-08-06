@@ -51,28 +51,12 @@ def pearson_correlation(a, b, eps=1e-8):
                              b - b.mean(1).unsqueeze(1), eps)
 
 
-def confidence_penalty(logits):
-    """Confidence penalty: encourage higher entropy (less over-confident predictions).
-    Adds mean(sum(p * log p)) which is <= 0; minimizing (adding) it increases entropy.
-    """
-    log_p = F.log_softmax(logits, dim=1)
-    p = log_p.exp()
-    return (p * log_p).sum(dim=1).mean()
-
-
-def symmetric_kl_with_logits(logits_p, logits_q, temperature=1.0):
-    """Symmetric KL between two categorical distributions parameterized by logits.
-    Returns mean( KL(p||q) + KL(q||p) ) / 2.
-    """
-    if temperature is None or temperature <= 0:
-        temperature = 1.0
-    log_p = F.log_softmax(logits_p / temperature, dim=1)
-    log_q = F.log_softmax(logits_q / temperature, dim=1)
+def symmetric_kl_divergence(logits_p, logits_q):
+    log_p = F.log_softmax(logits_p, dim=1)
+    log_q = F.log_softmax(logits_q, dim=1)
     p = log_p.exp()
     q = log_q.exp()
-    kl_pq = F.kl_div(log_q, p, reduction='batchmean')
-    kl_qp = F.kl_div(log_p, q, reduction='batchmean')
-    return 0.5 * (kl_pq + kl_qp)
+    return F.kl_div(log_p, q, reduction='batchmean') + F.kl_div(log_q, p, reduction='batchmean')
 
 
 def inter_class_relation(y_s, y_t):
@@ -157,23 +141,57 @@ def build_main_criterion(args, class_counts=None):
     return nn.CrossEntropyLoss()
 
 
+def apply_text_noise(text, args, train):
+    text_noise_std = getattr(args, 'text_noise_std', 0.0)
+    if train and text_noise_std > 0:
+        return text + torch.randn_like(text) * text_noise_std
+    return text
+
+
 def compute_class_counts(dataset, cls_num):
     counts = torch.zeros(cls_num)
     for label_list in dataset.labels.values():
         counts += torch.bincount(torch.tensor(label_list), minlength=cls_num)
     return counts
 
-def CE_Loss(args, pred_outs, logit_t, hidden_s, hidden_t, labels):
-    kd_ce_w = float(getattr(args, 'kd_ce_w', 1.0) or 1.0)
-    kd_logit_w = float(getattr(args, 'kd_logit_w', 0.1) or 0.1)
-    kd_feat_w = float(getattr(args, 'kd_feat_w', 1.0) or 1.0)
-    kd_tau = float(getattr(args, 'kd_tau', 2.0) or 2.0)
-    kd_feat_temp = float(getattr(args, 'kd_feat_temp', 1.0) or 1.0)
 
-    ori_loss = nn.CrossEntropyLoss()(pred_outs, labels)
-    logit_loss = Logit_Loss(tau=kd_tau).cuda()(pred_outs, logit_t)
-    feature_loss = Feature_Loss(temp=kd_feat_temp).cuda()(hidden_s, hidden_t)
-    return kd_ce_w * ori_loss + kd_logit_w * logit_loss + kd_feat_w * feature_loss
+def compute_scheduler_steps(num_batches, epochs, warmup_ratio):
+    num_training_steps = num_batches * epochs
+    num_warmup_steps = int(num_training_steps * warmup_ratio)
+    return num_training_steps, num_warmup_steps
+
+
+def CE_Loss(args, pred_outs, logit_t, hidden_s, hidden_t, labels):
+    ori_loss = nn.CrossEntropyLoss()
+    ori_loss = ori_loss(pred_outs, labels)
+    logit_loss = Logit_Loss(tau=args.kd_tau).to(pred_outs.device)
+    logit_loss = logit_loss(pred_outs, logit_t)
+    feature_loss = Feature_Loss(temp=args.kd_feat_temp).to(pred_outs.device)
+    feature_loss = feature_loss(hidden_s, hidden_t)
+    loss_val = (
+        args.kd_ce_w * ori_loss +
+        args.kd_logit_w * logit_loss +
+        args.kd_feat_w * feature_loss
+    )
+    return loss_val
+
+
+def select_anchor_outputs(args, logit_t, logit_a, logit_v, hidden_t, hidden_a, hidden_v):
+    anchor_modality = getattr(args, 'anchor_modality', 't')
+    if anchor_modality == 'a':
+        return logit_a, hidden_a, [
+            (logit_t, hidden_t, getattr(args, 'kd_a_w', 0.22)),
+            (logit_v, hidden_v, getattr(args, 'kd_v_w', 0.34)),
+        ]
+    if anchor_modality == 'v':
+        return logit_v, hidden_v, [
+            (logit_t, hidden_t, getattr(args, 'kd_a_w', 0.22)),
+            (logit_a, hidden_a, getattr(args, 'kd_v_w', 0.34)),
+        ]
+    return logit_t, hidden_t, [
+        (logit_a, hidden_a, getattr(args, 'kd_a_w', 0.22)),
+        (logit_v, hidden_v, getattr(args, 'kd_v_w', 0.34)),
+    ]
 
 
 def get_tsne_loader(args, split):
@@ -314,7 +332,7 @@ def draw_tsne_figure_all(tsne_data, class_names, save_path, title='MELD'):
     plt.close()
     print(f'[Saved] all-in-one t-SNE figure: {save_path}')
 
-def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=None, train=False, main_criterion=None, gamma_1=1.0, gamma_2=1.0, gamma_3=1.0):
+def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=None, train=False, main_criterion=None, consistency_coef=0.0, gamma_1=1.0, gamma_2=1.0, gamma_3=1.0):
     losses, preds, labels, masks = [], [], [], []
     losses_a_kd, losses_v_kd = [], []
 
@@ -326,13 +344,11 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
     else:
         model.eval()
 
-    rdrop_w = float(getattr(args, 'rdrop', 0.0) or 0.0)
-    rdrop_temp = float(getattr(args, 'rdrop_temp', 1.0) or 1.0)
-
     for data in data_loader:
         if train:
             optimizer.zero_grad()
         text, _, _, audio, video, qmask, umask, label = [d.cuda() for d in data[:-1]]
+        text = apply_text_noise(text, args, train)
 
         if not getattr(args, 'use_audio', True):
             audio = torch.zeros_like(audio)
@@ -357,52 +373,41 @@ def train_or_eval_model(model, data_loader, epoch, optimizer=None, scheduler=Non
         hidden_a = a_hidden[umask_bool]
         hidden_v = v_hidden[umask_bool]
 
-        loss_kd_a = CE_Loss(args, logit_a, logit_t, hidden_a, hidden_t, labels_)
-        loss_kd_v = CE_Loss(args, logit_v, logit_t, hidden_v, hidden_t, labels_)
+        anchor_logit, anchor_hidden, student_pairs = select_anchor_outputs(
+            args, logit_t, logit_a, logit_v, hidden_t, hidden_a, hidden_v
+        )
+        loss_kd_a = CE_Loss(
+            args, student_pairs[0][0], anchor_logit, student_pairs[0][1], anchor_hidden, labels_
+        )
+        loss_kd_v = CE_Loss(
+            args, student_pairs[1][0], anchor_logit, student_pairs[1][1], anchor_hidden, labels_
+        )
 
 
         # loss_val = loss(logit_t , labels_) + 0.01 * (loss_kd_a + loss_kd_v)
-        a = float(getattr(args, 'kd_a_w', 0.6) or 0.6)
-        b = float(getattr(args, 'kd_v_w', 0.7) or 0.7)
+        a = student_pairs[0][2]
+        b = student_pairs[1][2]
+        main_loss = main_criterion(anchor_logit, labels_) if main_criterion is not None else base_ce(anchor_logit, labels_)
+        loss_val = main_loss + a * loss_kd_a + b * loss_kd_v
 
-        conf_penalty_w = float(getattr(args, 'conf_penalty', 0.0) or 0.0)
-        logit_l2_w = float(getattr(args, 'logit_l2', 0.0) or 0.0)
-
-        def _main_and_reg(logits):
-            main_loss_local = main_criterion(logits, labels_) if main_criterion is not None else base_ce(logits, labels_)
-            reg_local = 0.0
-            if conf_penalty_w > 0:
-                reg_local = reg_local + conf_penalty_w * confidence_penalty(logits)
-            if logit_l2_w > 0:
-                reg_local = reg_local + logit_l2_w * (logits.pow(2).mean())
-            return main_loss_local, reg_local
-
-        # Main classification loss + optional "humility" regularizers
-        main_loss, reg = _main_and_reg(logit_t)
-        loss_val = main_loss + reg + a * loss_kd_a + b * loss_kd_v
-
-        # Optional R-Drop: second forward pass + symmetric KL for consistency
-        if train and rdrop_w > 0:
-            t_logit2, a_logit2, v_logit2, t_hidden2, a_hidden2, v_hidden2 = model(text, audio, video, umask, qmask, lengths)
-            logit_t2 = t_logit2[umask_bool]
-            logit_a2 = a_logit2[umask_bool]
-            logit_v2 = v_logit2[umask_bool]
-
-            hidden_t2 = t_hidden2[umask_bool]
-            hidden_a2 = a_hidden2[umask_bool]
-            hidden_v2 = v_hidden2[umask_bool]
-
-            loss_kd_a2 = CE_Loss(args, logit_a2, logit_t2, hidden_a2, hidden_t2, labels_)
-            loss_kd_v2 = CE_Loss(args, logit_v2, logit_t2, hidden_v2, hidden_t2, labels_)
-
-            main_loss2, reg2 = _main_and_reg(logit_t2)
-            base2 = main_loss2 + reg2 + a * loss_kd_a2 + b * loss_kd_v2
-
-            rdrop_loss = symmetric_kl_with_logits(logit_t, logit_t2, temperature=rdrop_temp)
-            loss_val = 0.5 * (loss_val + base2) + rdrop_w * rdrop_loss
+        if consistency_coef > 0:
+            cons_loss = (
+                symmetric_kl_divergence(logit_t, logit_a) +
+                symmetric_kl_divergence(logit_t, logit_v) +
+                symmetric_kl_divergence(logit_a, logit_v)
+            )
+            loss_val = loss_val + consistency_coef * cons_loss
 
 
-        pred_ = torch.argmax(logit_t , dim=1)
+        if args.prediction_mode == 'anchor_only':
+            fusion_logit = anchor_logit
+        else:
+            fusion_logit = (
+                args.pred_t_w * logit_t +
+                args.pred_a_w * logit_a +
+                args.pred_v_w * logit_v
+            )
+        pred_ = torch.argmax(fusion_logit, dim=1)
         preds.append(pred_.data.cpu().numpy())
         labels.append(labels_.data.cpu().numpy())
         masks.append(umask.view(-1).cpu().numpy())
@@ -444,7 +449,7 @@ def save_labels_and_preds(labels, preds, filename):
     with open(filename, 'w') as f:
         json.dump(data, f, indent=4)
 
-def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_loader, args, main_criterion):
+def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_loader, args, main_criterion, consistency_coef):
     best_fscore, best_loss, best_label, best_pred, best_mask = None, None, None, None, None
     all_fscore, all_acc, all_loss = [], [], []
 
@@ -452,20 +457,49 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
 
     for epoch in range(args.epochs):
         start = time.time()
-        train_loss, train_acc, _, _, _, train_fscore, train_loss_a_kd, train_loss_v_kd = train_or_eval_model(model, train_loader, epoch, optimizer, scheduler, True, main_criterion=main_criterion)
-        valid_loss, valid_acc, _, _, _, valid_fscore, valid_loss_a_kd, valid_loss_v_kd = train_or_eval_model(model, dev_loader, epoch, main_criterion=main_criterion)
-        test_loss, test_acc, label, pred, _, test_fscore, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion)
+        train_loss, train_acc, _, _, _, train_fscore, train_loss_a_kd, train_loss_v_kd = train_or_eval_model(model, train_loader, epoch, optimizer, scheduler, True, main_criterion=main_criterion, consistency_coef=consistency_coef)
+        valid_loss, valid_acc, _, _, _, valid_fscore, valid_loss_a_kd, valid_loss_v_kd = train_or_eval_model(model, dev_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
+        test_loss, test_acc, label, pred, _, test_fscore, test_loss_a_kd, test_loss_v_kd = train_or_eval_model(model, test_loader, epoch, main_criterion=main_criterion, consistency_coef=consistency_coef)
         
 
-       
+        epoch_metrics.append({
+            'epoch': int(epoch),
+            'train_loss': float(train_loss),
+            'train_acc': float(train_acc),
+            'valid_loss': float(valid_loss),
+            'valid_acc': float(valid_acc),
+            'test_acc': float(test_acc),
+            'test_fscore': float(test_fscore),
+        })
 
         print(f'epoch: {epoch}, train_loss: {train_loss}, train_acc: {train_acc}, train_fscore: {train_fscore} valid_loss: {valid_loss}, valid_acc: {valid_acc}, valid_fscore: {valid_fscore},test_loss: {test_loss}, test_acc: {test_acc}, test_fscore: {test_fscore}, time: {time.time()}')
         print(f'epoch: {epoch}, train_loss_a_kd: {train_loss_a_kd}, train_loss_v_kd: {train_loss_v_kd}, valid_loss_a_kd: {valid_loss_a_kd}, valid_loss_v_kd: {valid_loss_v_kd}, test_loss_a_kd: {test_loss_a_kd}, test_loss_v_kd: {test_loss_v_kd}')
 
-       
+        if best_fscore == None or test_fscore > best_fscore:
+            prev_best = best_fscore
+            best_fscore = test_fscore
+            print('=' * 72)
+            print(f'[NEW BEST] epoch={epoch}  test_fscore={test_fscore}  (prev_best={prev_best})')
+            print(f'train_loss={train_loss}  train_acc={train_acc}')
+            print(f'valid_loss={valid_loss}  valid_acc={valid_acc}')
+            print(f'test_acc={test_acc}  test_fscore={test_fscore}')
+            print('=' * 72)
+            _SaveModel(model, './MELD/save_model', 'multimodal_fusion_best.bin')
+            save_labels_and_preds(label, pred, f'MELD/save_model/multimodal_fusion_best.json')
+            print(f'done')
 
     # Final summary: print all epochs and save to disk
-    
+    if epoch_metrics:
+        print('\n' + '=' * 72)
+        print('Per-epoch summary (train_loss, train_acc, valid_loss, valid_acc, test_acc, test_fscore)')
+        print('=' * 72)
+        header = ['epoch', 'train_loss', 'train_acc', 'valid_loss', 'valid_acc', 'test_acc', 'test_fscore']
+        print('\t'.join(header))
+        for m in epoch_metrics:
+            print(
+                f"{m['epoch']}\t{m['train_loss']:.4f}\t{m['train_acc']:.2f}\t{m['valid_loss']:.4f}\t{m['valid_acc']:.2f}\t{m['test_acc']:.2f}\t{m['test_fscore']:.2f}"
+            )
+        print('=' * 72 + '\n')
 
         save_dir = './MELD/save_model'
         os.makedirs(save_dir, exist_ok=True)
@@ -489,36 +523,46 @@ def model_train(model, optimizer, scheduler, train_loader, dev_loader, test_load
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate for training.')
-    parser.add_argument('--l2', type=float, default=1e-6, help='l2 regularization weight.')
+    parser.add_argument('--l2', type=float, default=0, help='l2 regularization weight.')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size for training.')
     parser.add_argument('--seed', type=int, default=3407, help='random seed for training.')
     parser.add_argument('--epochs', type=int, default=25, help='epoch for training.')
+    parser.add_argument('--warmup_ratio', type=float, default=0.08, help='linear scheduler warmup ratio over optimizer steps.')
     parser.add_argument('--dropout', type=float, default=0.5, help='dropout rate.')
     parser.add_argument('--hidden_dim', type=int, default=768, help='hidden dimension.')
     parser.add_argument('--n_head', type=int, default=8, help='number of heads.')
     parser.add_argument('--temp', type=float, default=2.0, help='temperature for contrastive learning.')
     parser.add_argument('--clsNum', type=int, default=7, help='number of classes.')
     parser.add_argument('--train', type=str2bool, default=True, help='whether to train the model.')
-    parser.add_argument('--loss_type', type=str, default='focal', choices=['ce', 'focal', 'cb_focal', 'label_smoothing'], help='main classification loss type.')
+    parser.add_argument('--loss_type', type=str, default='label_smoothing', choices=['ce', 'focal', 'cb_focal', 'label_smoothing'], help='main classification loss type.')
     parser.add_argument('--focal_gamma', type=float, default=2.0, help='gamma for focal loss.')
     parser.add_argument('--focal_alpha', type=float, default=None, help='scalar alpha for focal loss (overridden by class-balanced).')
     parser.add_argument('--cb_beta', type=float, default=0.9999, help='beta for class-balanced focal loss.')
-    parser.add_argument('--label_smoothing', type=float, default=0.05, help='label smoothing factor for CE.')
-    parser.add_argument('--conf_penalty', type=float, default=0.01, help='confidence penalty weight (encourage higher entropy / less overconfident).')
-    parser.add_argument('--logit_l2', type=float, default=1e-4, help='L2 penalty on logits weight (shrink logits to be less confident).')
-    parser.add_argument('--rdrop', type=float, default=0.4, help='R-Drop weight (symmetric KL between two dropout passes; training only).')
-    parser.add_argument('--rdrop_temp', type=float, default=2.0, help='temperature for R-Drop KL (>=1 makes targets softer).')
-    parser.add_argument('--kd_a_w', type=float, default=0.4, help='weight for audio KD loss (loss_kd_a).')
-    parser.add_argument('--kd_v_w', type=float, default=1.0, help='weight for video KD loss (loss_kd_v).')
-    parser.add_argument('--kd_ce_w', type=float, default=1.0, help='weight for KD CE term inside CE_Loss.')
-    parser.add_argument('--kd_logit_w', type=float, default=0.1, help='weight for KD logit relation term inside CE_Loss.')
-    parser.add_argument('--kd_feat_w', type=float, default=1.0, help='weight for KD feature KL term inside CE_Loss.')
-    parser.add_argument('--kd_tau', type=float, default=2.0, help='temperature tau for Logit_Loss inside CE_Loss.')
-    parser.add_argument('--kd_feat_temp', type=float, default=1.0, help='temperature for Feature_Loss inside CE_Loss.')
+    parser.add_argument('--label_smoothing', type=float, default=0.0025, help='label smoothing factor for CE.')
+    parser.add_argument('--consistency_coef', type=float, default=0.045, help='weight for symmetric KL consistency between modalities.')
+    parser.add_argument('--conf_penalty', type=float, default=0.01, help='compatibility option; unused by the IEMOCAP-style loss.')
+    parser.add_argument('--logit_l2', type=float, default=1e-4, help='compatibility option; unused by the IEMOCAP-style loss.')
+    parser.add_argument('--rdrop', type=float, default=0.4, help='compatibility option; unused by the IEMOCAP-style loss.')
+    parser.add_argument('--rdrop_temp', type=float, default=2.0, help='compatibility option; unused by the IEMOCAP-style loss.')
+    parser.add_argument('--kd_a_w', type=float, default=0.22, help='weight for audio KD loss (loss_kd_a).')
+    parser.add_argument('--kd_v_w', type=float, default=0.34, help='weight for video KD loss (loss_kd_v).')
+    parser.add_argument('--kd_ce_w', type=float, default=1.0, help='weight for CE inside each modality KD loss.')
+    parser.add_argument('--kd_logit_w', type=float, default=0.11, help='weight for logit distillation inside each modality KD loss.')
+    parser.add_argument('--kd_feat_w', type=float, default=0.62, help='weight for feature distillation inside each modality KD loss.')
+    parser.add_argument('--kd_tau', type=float, default=1.85, help='temperature for logit distillation inside each modality KD loss.')
+    parser.add_argument('--kd_feat_temp', type=float, default=0.75, help='temperature for feature distillation inside each modality KD loss.')
+    parser.add_argument('--pred_t_w', type=float, default=1.0, help='weight for text logits in final prediction.')
+    parser.add_argument('--pred_a_w', type=float, default=0.1, help='weight for audio logits in final prediction.')
+    parser.add_argument('--pred_v_w', type=float, default=0, help='weight for video logits in final prediction.')
+    parser.add_argument('--anchor_modality', type=str, default='t', choices=['t', 'a', 'v'],
+                        help='dominant anchor modality for anchor selection analysis.')
+    parser.add_argument('--prediction_mode', type=str, default='weighted', choices=['weighted', 'anchor_only'],
+                        help='use weighted logits or the selected anchor logits for prediction.')
     parser.add_argument('--num_layer', type=int, default=6, help='number of TransformerEncoder layers in each intra/inter module.')
     parser.add_argument('--n_rounds', type=int, default=1, help='number of interaction rounds for Transformer Model.')
     parser.add_argument('--use_audio', type=str2bool, default=True, help='whether to use audio modality input (audio).')
     parser.add_argument('--use_video', type=str2bool, default=True, help='whether to use video modality input (video).')
+    parser.add_argument('--text_noise_std', type=float, default=0.0, help='std of Gaussian noise added to text features during training.')
     parser.add_argument('--draw_tsne', type=str2bool, default=False, help='whether to draw all-in-one t-SNE instead of training.')
     parser.add_argument('--tsne_split', type=str, default='test', choices=['train', 'dev', 'test'], help='which split to visualize.')
     parser.add_argument('--tsne_max_per_class', type=int, default=200, help='max samples per class for t-SNE.')
@@ -572,11 +616,12 @@ if __name__ == '__main__':
         )
         raise SystemExit(0)
 
-    num_training_steps = len(train_dataset) * args.epochs
-    num_warmup_steps = len(train_dataset)
+    num_training_steps, num_warmup_steps = compute_scheduler_steps(
+        num_batches=len(train_loader),
+        epochs=args.epochs,
+        warmup_ratio=args.warmup_ratio,
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.l2)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
 
-    model_train(model, optimizer, scheduler, train_loader, dev_loader, test_loader, args, main_criterion)
-
-
+    model_train(model, optimizer, scheduler, train_loader, dev_loader, test_loader, args, main_criterion, args.consistency_coef)
