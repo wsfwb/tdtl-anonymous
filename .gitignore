@@ -1,0 +1,22 @@
+# data & features
+feature/
+datasets/
+MOSEI/data/
+*.pkl
+
+# checkpoints & run outputs
+save_model/
+*/save_model/
+*/*/save_model/
+*.bin
+*.pt
+grid_logs*/
+*_grid_logs/
+noise_logs/
+search67/
+search55/runs/
+search55/logs/
+__pycache__/
+
+# fusion member training checkpoints (logits are kept under paper_results/)
+paper_results/mosei/fusion_members/*/best.bin

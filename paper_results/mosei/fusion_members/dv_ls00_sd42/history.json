@@ -1,0 +1,255 @@
+{
+ "history": [
+  {
+   "epoch": 0,
+   "valid_acc": 49.71,
+   "valid_wf1": 43.05,
+   "test_acc": 47.59,
+   "test_wf1": 41.27
+  },
+  {
+   "epoch": 1,
+   "valid_acc": 50.08,
+   "valid_wf1": 42.27,
+   "test_acc": 48.64,
+   "test_wf1": 41.14
+  },
+  {
+   "epoch": 2,
+   "valid_acc": 53.66,
+   "valid_wf1": 51.97,
+   "test_acc": 50.42,
+   "test_wf1": 48.73
+  },
+  {
+   "epoch": 3,
+   "valid_acc": 54.09,
+   "valid_wf1": 49.2,
+   "test_acc": 51.47,
+   "test_wf1": 46.85
+  },
+  {
+   "epoch": 4,
+   "valid_acc": 53.18,
+   "valid_wf1": 51.0,
+   "test_acc": 51.11,
+   "test_wf1": 49.35
+  },
+  {
+   "epoch": 5,
+   "valid_acc": 53.66,
+   "valid_wf1": 50.76,
+   "test_acc": 51.79,
+   "test_wf1": 49.08
+  },
+  {
+   "epoch": 6,
+   "valid_acc": 54.04,
+   "valid_wf1": 51.48,
+   "test_acc": 51.47,
+   "test_wf1": 49.39
+  },
+  {
+   "epoch": 7,
+   "valid_acc": 54.2,
+   "valid_wf1": 50.03,
+   "test_acc": 52.59,
+   "test_wf1": 48.74
+  },
+  {
+   "epoch": 8,
+   "valid_acc": 54.09,
+   "valid_wf1": 51.18,
+   "test_acc": 52.61,
+   "test_wf1": 50.05
+  },
+  {
+   "epoch": 9,
+   "valid_acc": 53.82,
+   "valid_wf1": 52.25,
+   "test_acc": 51.53,
+   "test_wf1": 50.21
+  },
+  {
+   "epoch": 10,
+   "valid_acc": 54.09,
+   "valid_wf1": 51.2,
+   "test_acc": 52.59,
+   "test_wf1": 49.91
+  },
+  {
+   "epoch": 11,
+   "valid_acc": 54.41,
+   "valid_wf1": 52.05,
+   "test_acc": 52.67,
+   "test_wf1": 50.66
+  },
+  {
+   "epoch": 12,
+   "valid_acc": 54.89,
+   "valid_wf1": 53.38,
+   "test_acc": 52.41,
+   "test_wf1": 51.1
+  },
+  {
+   "epoch": 13,
+   "valid_acc": 54.94,
+   "valid_wf1": 53.14,
+   "test_acc": 52.16,
+   "test_wf1": 50.72
+  },
+  {
+   "epoch": 14,
+   "valid_acc": 54.94,
+   "valid_wf1": 52.56,
+   "test_acc": 52.95,
+   "test_wf1": 50.81
+  },
+  {
+   "epoch": 15,
+   "valid_acc": 53.87,
+   "valid_wf1": 51.48,
+   "test_acc": 52.41,
+   "test_wf1": 50.55
+  },
+  {
+   "epoch": 16,
+   "valid_acc": 53.93,
+   "valid_wf1": 52.13,
+   "test_acc": 52.95,
+   "test_wf1": 51.38
+  },
+  {
+   "epoch": 17,
+   "valid_acc": 54.78,
+   "valid_wf1": 52.49,
+   "test_acc": 52.78,
+   "test_wf1": 50.81
+  },
+  {
+   "epoch": 18,
+   "valid_acc": 54.62,
+   "valid_wf1": 52.07,
+   "test_acc": 52.44,
+   "test_wf1": 50.41
+  },
+  {
+   "epoch": 19,
+   "valid_acc": 53.13,
+   "valid_wf1": 50.7,
+   "test_acc": 52.84,
+   "test_wf1": 50.54
+  },
+  {
+   "epoch": 20,
+   "valid_acc": 54.73,
+   "valid_wf1": 51.9,
+   "test_acc": 52.61,
+   "test_wf1": 50.36
+  },
+  {
+   "epoch": 21,
+   "valid_acc": 54.94,
+   "valid_wf1": 52.59,
+   "test_acc": 53.72,
+   "test_wf1": 51.71
+  },
+  {
+   "epoch": 22,
+   "valid_acc": 54.94,
+   "valid_wf1": 53.9,
+   "test_acc": 51.9,
+   "test_wf1": 51.03
+  },
+  {
+   "epoch": 23,
+   "valid_acc": 54.68,
+   "valid_wf1": 52.72,
+   "test_acc": 52.69,
+   "test_wf1": 51.15
+  },
+  {
+   "epoch": 24,
+   "valid_acc": 55.37,
+   "valid_wf1": 53.73,
+   "test_acc": 53.08,
+   "test_wf1": 51.59
+  },
+  {
+   "epoch": 25,
+   "valid_acc": 54.84,
+   "valid_wf1": 53.11,
+   "test_acc": 52.46,
+   "test_wf1": 51.07
+  },
+  {
+   "epoch": 26,
+   "valid_acc": 55.37,
+   "valid_wf1": 53.33,
+   "test_acc": 52.59,
+   "test_wf1": 50.84
+  },
+  {
+   "epoch": 27,
+   "valid_acc": 55.05,
+   "valid_wf1": 53.35,
+   "test_acc": 52.82,
+   "test_wf1": 51.48
+  },
+  {
+   "epoch": 28,
+   "valid_acc": 54.52,
+   "valid_wf1": 53.0,
+   "test_acc": 52.63,
+   "test_wf1": 51.47
+  },
+  {
+   "epoch": 29,
+   "valid_acc": 54.73,
+   "valid_wf1": 53.12,
+   "test_acc": 52.61,
+   "test_wf1": 51.41
+  }
+ ],
+ "best": {
+  "epoch": 21,
+  "test_acc": 53.72,
+  "test_wf1": 51.71,
+  "valid_acc": 54.94
+ },
+ "args": {
+  "lr": 0.0006,
+  "scheduler_mode": "fixed",
+  "l2": 1e-06,
+  "batch_size": 128,
+  "seed": 42,
+  "epochs": 30,
+  "dropout": 0.3,
+  "hidden_dim": 768,
+  "n_head": 8,
+  "num_layers": 5,
+  "n_rounds": 3,
+  "temp": 2.0,
+  "clsNum": 7,
+  "train": true,
+  "loss_type": "label_smoothing",
+  "focal_gamma": 2.0,
+  "focal_alpha": null,
+  "cb_beta": 0.9999,
+  "label_smoothing": 0.0,
+  "consistency_coef": 0.1,
+  "kd_a_w": 0.7,
+  "kd_v_w": 0.5,
+  "pred_t_w": 1.0,
+  "pred_a_w": 0.6,
+  "pred_v_w": 0.2,
+  "use_audio": true,
+  "use_video": true,
+  "text_noise_std": 0.1,
+  "final_fusion_mode": "text_only",
+  "final_fusion_modes": "",
+  "train_path": "./feature/train_features.pkl",
+  "dev_path": "./feature/dev_features.pkl",
+  "test_path": "./feature/test_features.pkl"
+ }
+}

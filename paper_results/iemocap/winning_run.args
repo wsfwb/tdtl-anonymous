@@ -1,0 +1,1 @@
+python multimodel_fusion.py --train True --seed 42 --epochs 30 --batch_size 16 --lr 1e-4 --l2 1e-6 --dropout 0.5 --n_rounds 1 --num_layers 6 --loss_type cb_focal --cb_beta 0.9999 --focal_gamma 2.0 --label_smoothing 0 --consistency_coef 0.1 --kd_a_w 0.5 --kd_v_w 0.5 --pred_t_w 1.0 --pred_a_w 0.4 --pred_v_w 0.0
