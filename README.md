@@ -121,18 +121,6 @@ cd MOSEI
 python verify_paper_fusion.py          # recomputes 55.0547 Acc-7 from paper_results/
 ```
 
-The single best model in the pool reached 53.92 (`dv_ls00_sd42`, bs128 recipe, epoch 21); members were trained with `search55/run_search.py`, e.g.:
-
-```bash
-python search55/run_search.py --run_name bs128_sd1457 \
-  --batch_size 128 --lr 6e-4 --num_layers 5 --n_rounds 3 --dropout 0.3 \
-  --loss_type label_smoothing --label_smoothing 0.1 --consistency_coef 0.1 \
-  --kd_a_w 0.7 --kd_v_w 0.5 --text_noise_std 0.1 \
-  --pred_t_w 1.0 --pred_a_w 0.6 --pred_v_w 0.2 --epochs 30 --seed 1457
-```
-
-Exact per-member arguments are stored in `paper_results/mosei/fusion_members/<run>/history.json` (`args` field). The fusion weights were obtained by greedy ensemble selection with integer-count refinement (`search55/anneal_full.py`).
-
 ## Evaluating a trained checkpoint
 
 ```bash
