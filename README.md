@@ -12,12 +12,24 @@ Official implementation of **TDERC** (paper: *"Text-Dominant Information Flow fo
 
 Training logs reproducing these numbers are included in `paper_results/`.
 
+The IEMOCAP fusion checkpoint and the stage-1 IEMOCAP features are released as
+GitHub Release assets (files exceed the 100 MB git limit), so the IEMOCAP and
+CMU-MOSEI results can be reproduced without retraining:
+
+```bash
+./scripts/download_and_eval.sh
+```
+
+MELD and CMU-MOSEI weights are not released (the MOSEI paper number is a
+logit-level fusion; see `MOSEI/verify_paper_fusion.py`).
+
 ## Repository layout
 
 ```
 IEMOCAP/   full pipeline: stage-1 unimodal training, feature extraction, stage-2 fusion training
 MELD/      stage-2 fusion training (features are built with the IEMOCAP stage-1 scripts)
 MOSEI/     stage-2 fusion training + data conversion + fusion search
+scripts/   weight download + one-command evaluation
 paper_results/  logs / configs / fusion recipes backing the reported numbers
 ```
 
@@ -124,8 +136,15 @@ python verify_paper_fusion.py          # recomputes 55.0547 Acc-7 from paper_res
 ## Evaluating a trained checkpoint
 
 ```bash
-python multimodel_fusion.py --train False    # from the dataset directory; loads <DS>/<DS>/save_model/multimodal_fusion_best.bin
+# IEMOCAP (weights + features fetched via scripts/download_weights.py)
+cd IEMOCAP && python multimodel_fusion.py --train False
+
+# MELD / MOSEI (after training, or with your own checkpoint)
+cd MELD  && python multimodel_fusion.py --train False
+cd MOSEI && python multimodel_fusion.py --train False
 ```
+
+`--train False` only evaluates; it never overwrites the checkpoint.
 
 ## Citation
 

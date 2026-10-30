@@ -1,5 +1,6 @@
 import numpy as np
 import argparse, time
+import sys
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -685,7 +686,24 @@ if __name__ == '__main__':
 
     ckpt_path = './IEMOCAP/save_model/multimodal_fusion_best.bin'
     if (not args.train) or args.draw_tsne:
-        model.load_state_dict(torch.load(ckpt_path))
+        if not os.path.exists(ckpt_path):
+            sys.exit(
+                f'Checkpoint not found: {ckpt_path}\n'
+                'Download the released weights first, e.g.:\n'
+                '  python scripts/download_weights.py iemocap'
+            )
+        model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
+
+    if not args.train:
+        # evaluation-only mode: report test metrics and exit (no training, no checkpoint overwrite)
+        model = model.cuda().eval()
+        for split, loader in (('dev', dev_loader), ('test', test_loader)):
+            _, acc, l, p, _, wf1, _, _ = train_or_eval_model(
+                model, loader, 0, main_criterion=main_criterion,
+                consistency_coef=args.consistency_coef,
+            )
+            print(f'[{split}] Acc: {acc:.2f}  WF1: {wf1:.2f}  (n={len(l)})')
+        raise SystemExit(0)
 
     if args.draw_tsne:
         _, tsne_loader = get_tsne_loader(args, args.tsne_split)

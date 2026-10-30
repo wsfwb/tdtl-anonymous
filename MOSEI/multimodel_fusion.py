@@ -1,5 +1,6 @@
 import numpy as np
 import argparse, time
+import sys
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -537,10 +538,26 @@ def run_single_experiment(args, train_loader, dev_loader, test_loader, train_dat
 
     if not args.train:
         if os.path.exists(ckpt_path):
-            model.load_state_dict(torch.load(ckpt_path))
+            model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
         else:
-            print(f'[WARN] checkpoint not found: {ckpt_path}, switch to train mode.')
-            args.train = True
+            sys.exit(
+                f'Checkpoint not found: {ckpt_path}\n'
+                'Train the fusion model first (see README). The paper Acc-7 (55.05)\n'
+                'is a logit-level fusion result and can be verified without any\n'
+                'checkpoint: python verify_paper_fusion.py'
+            )
+        # evaluation-only mode: report dev/test metrics and exit (no training, no checkpoint overwrite)
+        model = model.cuda().eval()
+        for split, loader in (('dev', dev_loader), ('test', test_loader)):
+            _, acc, l, p, _, wf1, acc2, f1b, _, _ = train_or_eval_model(
+                model, loader, 0, main_criterion=main_criterion,
+                consistency_coef=args.consistency_coef,
+            )
+            print(f'[{split}] Acc-7: {acc:.2f}  WF1: {wf1:.2f}  Acc-2: {acc2:.2f}  F1: {f1b:.2f}  (n={len(l)})')
+        return {
+            'exp_name': exp_name,
+            'final_fusion_mode': args.final_fusion_mode,
+        }
 
     if args.draw_tsne:
         if os.path.exists(ckpt_path):
