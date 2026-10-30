@@ -577,6 +577,11 @@ if __name__ == '__main__':
     train_path = './feature/train_features.pkl'
     dev_path = './feature/dev_features.pkl'
     test_path = './feature/test_features.pkl'
+    if not args.train and not all(os.path.exists(p) for p in (train_path, dev_path, test_path)):
+        sys.exit(
+            'Feature files not found under ./feature/. Build the MELD stage-1\n'
+            'features first (see README "Pipeline"), then re-run with --train False.'
+        )
 
     train_dataset = MELD_MM_Dataset(train_path)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=7, collate_fn=train_dataset.collate_fn)
