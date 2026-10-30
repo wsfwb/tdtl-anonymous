@@ -138,7 +138,7 @@ python verify_paper_fusion.py          # recomputes 55.0547 Acc-7 from paper_res
 ```bash
 # IEMOCAP / MELD (weights fetched via scripts/download_weights.py)
 cd IEMOCAP && python multimodel_fusion.py --train False
-cd MELD  && python multimodel_fusion.py --train False
+cd MELD  && python multimodel_fusion.py --train False --prediction_mode anchor_only
 
 # MOSEI (after training, or with your own checkpoint)
 cd MOSEI && python multimodel_fusion.py --train False
