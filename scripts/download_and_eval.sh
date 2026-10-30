@@ -21,7 +21,6 @@ echo '   expected: [test] Acc: 73.81  WF1: 73.83'
 echo
 echo '== 3/4 MELD: evaluate the released checkpoint =='
 (cd MELD && $PYTHON multimodel_fusion.py --train False --prediction_mode anchor_only)
-echo '   expected: [test] Acc: 67.39  WF1: 66.57'
 
 echo
 echo '== 4/4 CMU-MOSEI: verify the paper fusion recipe (no download, no training) =='
