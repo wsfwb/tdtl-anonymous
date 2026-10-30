@@ -41,8 +41,8 @@ Pretrained feature extractors (frozen, downloaded from HuggingFace) are expected
 
 - `roberta-large`
 - `data2vec-audio-base-960h`
-- `timesformer-base-finetuned-k400` (first-stage video, IEMOCAP pipeline only)
-- `videomae-base` (video feature extraction, IEMOCAP pipeline only)
+- `timesformer-base-finetuned-k400` 
+- `videomae-base`
 
 ```bash
 mkdir -p pretrained_model
