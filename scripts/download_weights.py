@@ -5,11 +5,13 @@ larger than the 100 MB git limit), so they are fetched over the GitHub API.
 
 Usage (from the repository root):
     python scripts/download_weights.py             # everything below
-    python scripts/download_weights.py iemocap     # fusion checkpoint only
-    python scripts/download_weights.py features    # stage-1 IEMOCAP features
+    python scripts/download_weights.py iemocap     # IEMOCAP fusion checkpoint
+    python scripts/download_weights.py meld        # MELD fusion checkpoint
+    python scripts/download_weights.py features   # stage-1 IEMOCAP features
 
 Files land in:
     IEMOCAP/IEMOCAP/save_model/multimodal_fusion_best.bin   (iemocap)
+    MELD/MELD/save_model/multimodal_fusion_best.bin         (meld)
     IEMOCAP/feature/{train,dev,test}_features.pkl          (features)
 """
 import argparse
@@ -45,10 +47,16 @@ ASSETS = {
         'IEMOCAP/feature/test_features.pkl',
         'IEMOCAP stage-1 features (test split)',
     ),
+    'meld_fusion.bin': (
+        '1fd9e6c7fbec56d67bbab82443d55d8d',
+        'MELD/MELD/save_model/multimodal_fusion_best.bin',
+        'MELD stage-2 fusion checkpoint',
+    ),
 }
 
 GROUPS = {
     'iemocap': ['iemocap_fusion.bin'],
+    'meld': ['meld_fusion.bin'],
     'features': ['iemocap_train_features.pkl', 'iemocap_dev_features.pkl', 'iemocap_test_features.pkl'],
 }
 
@@ -121,12 +129,12 @@ def fetch(names):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('group', nargs='?', default='all',
-                        choices=['all', 'iemocap', 'features'],
+                        choices=['all', 'iemocap', 'meld', 'features'],
                         help='which artifacts to fetch (default: all)')
     args = parser.parse_args()
     names = sum(GROUPS.values(), []) if args.group == 'all' else GROUPS[args.group]
     fetch(names)
-    print('\nDone. Evaluate with:  cd IEMOCAP && python multimodel_fusion.py --train False')
+    print('\nDone. Evaluate with:  cd <IEMOCAP|MELD> && python multimodel_fusion.py --train False')
 
 
 if __name__ == '__main__':
