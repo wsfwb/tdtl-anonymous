@@ -20,10 +20,11 @@ echo '   expected: [test] Acc: 73.81  WF1: 73.83'
 
 echo
 echo '== 3/4 MELD: evaluate the released checkpoint =='
-(cd MELD && $PYTHON multimodel_fusion.py --train False --prediction_mode anchor_only)
+(cd MELD && $PYTHON multimodel_fusion.py --train False)
+echo '   expected: [test] Acc: 67.24  WF1: 68.66'
 
 echo
-echo '== 4/4 CMU-MOSEI: verify the paper fusion recipe (no download, no training) =='
+echo '== 4/4 CMU-MOSEI: verify the paper fusion recipe'
 (cd MOSEI && $PYTHON verify_paper_fusion.py)
 echo '   expected: test Acc-7: 55.0547'
 
